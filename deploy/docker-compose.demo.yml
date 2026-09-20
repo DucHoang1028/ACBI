@@ -1,0 +1,20 @@
+# Use after the base and local profiles. cloudflared runs on Windows, outside Compose.
+services:
+  web:
+    ports: !override
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ./nginx.demo.conf:/etc/nginx/conf.d/default.conf:ro
+  backend:
+    environment:
+      WAREHOUSE_SSLMODE: verify-full
+      PGSSLROOTCERT: /run/warehouse-ca.crt
+      # The backend is unpublished; only our web proxy supplies forwarded headers.
+      FORWARDED_ALLOW_IPS: "*"
+    volumes:
+      - type: bind
+        source: ./certs/warehouse-ca.crt
+        target: /run/warehouse-ca.crt
+        read_only: true
+        bind:
+          create_host_path: false
