@@ -1,5 +1,1 @@
-.result-chart,.kpi-card{margin:24px 0;padding:18px 8px;background:#f7fafb;border:1px solid #d8e4e9;border-radius:8px}
-.result-chart figcaption,.kpi-card figcaption{font-size:15px;font-weight:650;padding:0 12px 18px}
-.kpi-card{padding:24px}.kpi-card figcaption{padding:0 0 14px}.kpi-card strong{display:block;color:#176c80;font-size:clamp(24px,5vw,38px);overflow-wrap:anywhere}
-.result-chart .recharts-wrapper{font-size:12px}.result-chart .recharts-legend-wrapper{font-size:12px}
-@media(max-width:520px){.question{padding:16px}.result-chart{margin-left:-8px;margin-right:-8px;padding:12px 0}}
+.result-chart,.kpi-card{margin:20px 0;padding:18px 10px;background:#f6f9f5;border:1px solid #e0e9dd;border-radius:15px}.result-chart figcaption,.kpi-card figcaption{font-size:12px;font-weight:600;padding:0 12px 16px;color:#638166}.kpi-card{padding:25px 28px;background:linear-gradient(120deg,#f1f7ed,#f9fbf8)}.kpi-card figcaption{padding:0 0 10px}.kpi-card strong{display:block;color:#2c6747;font-size:clamp(28px,4vw,40px);font-weight:550;letter-spacing:-.04em;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.kpi-card p{font-size:11px;color:#80947f;margin:7px 0 0}.result-chart .recharts-wrapper,.result-chart .recharts-legend-wrapper{font-size:11px}

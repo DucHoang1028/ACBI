@@ -52,10 +52,10 @@ from GitHub. These accounts are not anonymous public-demo credentials.
    allow at most roughly five questions/minute before other constraints. These
    budgets are shared by this backend instance, not allocated per user. The
    five-concurrent-request performance check used FakeLLM, not real Groq.
-5. **Sessions:** access tokens expire after 15 minutes. The frontend refreshes
-   on page load, but does not automatically renew and retry an expired request.
-   Reloading usually restores the session; otherwise sign in again. The generic
-   failed-question message does not clearly distinguish expiry.
+5. **Sessions:** access tokens expire after 15 minutes. The frontend now refreshes
+   on page load and every 12 minutes while active, preserving the current chat.
+   Browser sleep or a network outage can still interrupt renewal; reload or sign
+   in again if needed. There is no automatic replay of a failed question.
 6. **History:** the UI exposes the latest saved result per conversation, based on
    the most recent 200 saved results. Older turns are stored but are not fully
    browsable in the UI. There is no pagination, search, or export workflow.
@@ -77,6 +77,6 @@ from GitHub. These accounts are not anonymous public-demo credentials.
     the LLM remains disabled. Factual summaries are generated from validated rows
     locally, and visualizations are checked before rendering.
 
-The practical next improvements are automatic session renewal, complete history
-browsing, nonblocking voice processing, broader live-model evaluation, and a
+The practical next improvements are complete history browsing,
+nonblocking voice processing, broader live-model evaluation, and a
 stable host with tested backups.

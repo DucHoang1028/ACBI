@@ -4,75 +4,48 @@ import { Chat } from './Chat';
 import { Admin } from './Admin';
 import './style.css';
 
-type Readiness = {data_as_of: string; proposed_metric_count: number; approved_metric_count: number; llm_enabled: boolean; advanced_analysis_enabled:boolean};
-type Identity = {username: string; role: string; factories: number[] | 'all'};
-type Metric = {metric_id: string; name: string; version: number};
-const labels = {
-  vi: {title:'Trợ lý phân tích doanh nghiệp', phase:'Giai đoạn 4 · Kết quả và lịch sử', anchor:'Ngày tham chiếu dữ liệu',
-    subtitle:'Mọi kỳ tương đối sẽ dựa trên ngày này.', description:'Đặt câu hỏi về các chỉ số trong phạm vi của bạn.',
-    proposed:'Chỉ số đề xuất', approved:'Chỉ số đã phê duyệt', error:'Không thể kiểm tra kết nối.', loading:'Đang kiểm tra kết nối…',
-    login:'Đăng nhập', username:'Tên tài khoản', password:'Mật khẩu', logout:'Đăng xuất', denied:'Tên tài khoản hoặc mật khẩu không đúng.',
-    available:'Chỉ số trong phạm vi của bạn', none:'Không có chỉ số nghiệp vụ trong phạm vi này.', scope:'Phạm vi nhà máy', allFactories:'Tất cả'},
-  en: {title:'Conversational business intelligence', phase:'Phase 4 · Results and history', anchor:'Data reference date',
-    subtitle:'All relative periods will use this date.', description:'Ask about approved metrics within your access scope.',
-    proposed:'Proposed metrics', approved:'Approved metrics', error:'Unable to check connectivity.', loading:'Checking connectivity…',
-    login:'Sign in', username:'Username', password:'Password', logout:'Sign out', denied:'Incorrect username or password.',
-    available:'Metrics in your scope', none:'No business metrics in this scope.', scope:'Factory scope', allFactories:'All'}
-};
-
+type Readiness = {data_as_of:string;llm_enabled:boolean;advanced_analysis_enabled:boolean};
+type Identity = {username:string;role:string;factories:number[]|'all'};
 function App() {
-  const [language,setLanguage] = useState<'vi'|'en'>('vi');
-  const [data,setData] = useState<Readiness|null>(null);
-  const [failed,setFailed] = useState(false);
-  const [access,setAccess] = useState('');
-  const [identity,setIdentity] = useState<Identity|null>(null);
-  const [metrics,setMetrics] = useState<Metric[]>([]);
-  const [username,setUsername] = useState('');
-  const [password,setPassword] = useState('');
-  const [loginError,setLoginError] = useState(false);
-  const t = labels[language];
-  useEffect(() => { document.documentElement.lang=language; }, [language]);
-  useEffect(() => {
-    fetch('/api/bootstrap').then(r=>{if(!r.ok) throw new Error(); return r.json();}).then(setData).catch(()=>setFailed(true));
-    fetch('/api/auth/refresh',{method:'POST'}).then(r=>r.ok?r.json():null).then(r=>{if(r) setAccess(r.access_token);}).catch(()=>{});
+  const [language,setLanguage]=useState<'vi'|'en'>('vi');
+  const [data,setData]=useState<Readiness|null>(null);
+  const [access,setAccess]=useState('');
+  const [identity,setIdentity]=useState<Identity|null>(null);
+  const [username,setUsername]=useState('');
+  const [password,setPassword]=useState('');
+  const [error,setError]=useState('');
+  const [busy,setBusy]=useState(false);
+  const vi=language==='vi';
+  useEffect(()=>{document.documentElement.lang=language;},[language]);
+  useEffect(()=>{
+    fetch('/api/bootstrap').then(r=>{if(!r.ok)throw Error();return r.json();}).then(setData).catch(()=>setError('Không thể kết nối máy chủ / Server unavailable'));
+    fetch('/api/auth/refresh',{method:'POST'}).then(r=>r.ok?r.json():null).then(r=>{if(r)setAccess(r.access_token);}).catch(()=>{});
   },[]);
-  useEffect(() => {
-    if(!access) {setIdentity(null);setMetrics([]);return;}
-    const headers={Authorization:`Bearer ${access}`};
-    fetch('/api/auth/me',{headers}).then(r=>{if(!r.ok) throw new Error();return r.json();}).then(setIdentity).catch(()=>setAccess(''));
-    fetch('/api/metadata',{headers}).then(r=>r.ok?r.json():null).then(r=>setMetrics(r?.metrics ?? [])).catch(()=>setMetrics([]));
-  },[access]);
-  async function signIn(event: React.FormEvent) {
-    event.preventDefault();setLoginError(false);
-    try {
-      const response=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});
-      if(!response.ok) throw new Error();
-      setAccess((await response.json()).access_token);setPassword('');
-    } catch {setLoginError(true);}
+  useEffect(()=>{
+    if(!access){setIdentity(null);return;}
+    fetch('/api/auth/me',{headers:{Authorization:`Bearer ${access}`}}).then(r=>{if(!r.ok)throw Error();return r.json();}).then(setIdentity).catch(()=>setAccess(''));
+    const timer=setInterval(()=>{
+      fetch('/api/auth/refresh',{method:'POST'}).then(r=>{if(!r.ok)throw Error();return r.json();}).then(r=>setAccess(r.access_token)).catch(()=>{setAccess('');setError(vi?'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.':'Session expired. Please sign in again.');});
+    },12*60*1000);
+    return ()=>clearInterval(timer);
+  },[access,vi]);
+  async function signIn(event:React.FormEvent){
+    event.preventDefault();setBusy(true);setError('');
+    try{
+      const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});
+      if(!r.ok)throw Error();setAccess((await r.json()).access_token);setPassword('');
+    }catch{setError(vi?'Không đăng nhập được. Kiểm tra tài khoản hoặc thử lại sau.':'Unable to sign in. Check your credentials or try later.');}
+    finally{setBusy(false);}
   }
-  async function signOut() {
-    await fetch('/api/auth/logout',{method:'POST'}).catch(()=>{});
-    setAccess('');setUsername('');setPassword('');
-  }
-  return <main>
-    <header><a className="brand" href="/">ACBI<span> / AdventureWorks</span></a>
-      <button onClick={()=>setLanguage(language==='vi'?'en':'vi')} aria-label="Change language">{language==='vi'?'English':'Tiếng Việt'}</button></header>
-    <section><p className="eyebrow">{t.phase}</p><h1>{t.title}</h1><p className="intro">{t.description}</p>
-      {identity?<article className="access"><div className="access-head"><strong>{identity.username} <small>({identity.role})</small></strong><button onClick={signOut}>{t.logout}</button></div>
-        <p>{t.scope}: {identity.factories==='all'?t.allFactories:identity.factories.join(', ')||'—'}</p><h2>{t.available}</h2>
-        {metrics.length?<ul>{metrics.map(m=><li key={m.metric_id}>{m.name} · v{m.version}</li>)}</ul>:<p>{t.none}</p>}
-      </article>:<form className="access" onSubmit={signIn}><h2>{t.login}</h2>
-        <label>{t.username}<input required autoComplete="username" value={username} onChange={e=>setUsername(e.target.value)}/></label>
-        <label>{t.password}<input required type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)}/></label>
-        {loginError&&<p role="alert">{t.denied}</p>}<button type="submit">{t.login}</button>
-      </form>}
-      {identity&&identity.role!=='it_admin'&&<Chat key={access} access={access} enabled={!!data?.llm_enabled} advancedEnabled={!!data?.advanced_analysis_enabled} anchor={data?.data_as_of||''} language={language}/>}
-      {identity?.role==='it_admin'&&<Admin access={access} language={language}/>}
-      {failed?<p role="alert">{t.error}</p>:!data?<p role="status">{t.loading}</p>:<>
-        <article><p>{t.anchor}</p><strong className="date">{data.data_as_of}</strong><p>{t.subtitle}</p></article>
-        <div className="metrics"><article><strong>{data.proposed_metric_count}</strong><p>{t.proposed}</p></article><article><strong>{data.approved_metric_count}</strong><p>{t.approved}</p></article></div>
-      </>}
-    </section><footer>ACBI · Phase 4</footer>
+  async function signOut(){await fetch('/api/auth/logout',{method:'POST'}).catch(()=>{});setAccess('');setPassword('');}
+  return <main className={identity?'app-shell':'login-shell'}>
+    <header className="topbar"><a className="brand" href="/">ACBI<span>Workspace</span></a>
+      <div className="topbar-actions">{identity&&<span className="user-badge">{identity.username}</span>}<button className="quiet" onClick={()=>setLanguage(vi?'en':'vi')}>{vi?'English':'Tiếng Việt'}</button>{identity&&<button className="quiet" onClick={signOut}>{vi?'Đăng xuất':'Sign out'}</button>}</div>
+    </header>
+    {!identity?<section className="login-view"><div className="login-intro"><span className="eyebrow">CONVERSATIONAL BUSINESS INTELLIGENCE</span><h1>{vi?'Dữ liệu của bạn.\nCâu trả lời rõ ràng.':'Your data.\nClear answers.'}</h1><p>{vi?'Khám phá doanh thu, sản xuất và chất lượng qua cuộc trò chuyện. Mỗi kết quả đều có nguồn để kiểm chứng.':'Explore revenue, production and quality through conversation. Every result has a source.'}</p><div className="feature-tags"><span>AdventureWorks</span><span>{vi?'Truy cập theo vai trò':'Role-based access'}</span><span>{vi?'Dữ liệu có kiểm chứng':'Traceable results'}</span></div></div>
+      <form className="login-card" onSubmit={signIn}><div className="app-icon">A</div><h2>{vi?'Chào mừng trở lại':'Welcome back'}</h2><p>{vi?'Đăng nhập để bắt đầu phân tích.':'Sign in to start exploring.'}</p><label>{vi?'Tên tài khoản':'Username'}<input required autoComplete="username" value={username} onChange={e=>setUsername(e.target.value)}/></label><label>{vi?'Mật khẩu':'Password'}<input required type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)}/></label>{error&&<p className="error" role="alert">{error}</p>}<button className="primary" disabled={busy}>{busy?(vi?'Đang đăng nhập…':'Signing in…'):(vi?'Đăng nhập':'Sign in')}</button></form></section>
+      :identity.role==='it_admin'?<section className="admin-page"><h1>{vi?'Quản trị hệ thống':'Administration'}</h1><Admin access={access} language={language}/></section>
+      :<Chat key={identity.username} access={access} enabled={!!data?.llm_enabled} advancedEnabled={!!data?.advanced_analysis_enabled} anchor={data?.data_as_of||''} language={language} role={identity.role}/>}
   </main>;
 }
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);

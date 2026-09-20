@@ -4,7 +4,7 @@ import logging
 from dataclasses import replace
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 import httpx
@@ -17,6 +17,7 @@ from app.ai.budget import RequestBudget
 from app.ai.client import FakeLLM, Intent
 from app.api.auth import current_user
 from app.chat.service import audit, get_context, save_context
+from app.core.dates import date_hints
 from app.history.service import save as save_result
 from app.presentation.charts import TABLE, describe, validate_viz
 from app.presentation.summary import factual, numbers_match
@@ -35,22 +36,37 @@ logger = logging.getLogger("acbi.chat")
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
     conversation_id: str | None = None
+    language: Literal["vi", "en"] = "en"
 
 
-def merged_intent(intent: Intent, prior: dict[str, Any] | None) -> Intent:
-    if not prior:
-        return intent
-    slots = dict(prior.get("slots") or {})
+def merged_intent(
+    intent: Intent, prior: dict[str, Any] | None, question: str = ""
+) -> Intent:
+    slots = dict((prior or {}).get("slots") or {})
     current = intent.model_dump()
+    hints = date_hints(question)
+    current.update(hints)
     for field in ("metric_id", "period", "factory_id", "territory"):
         if current[field] is None:
             current[field] = slots.get(field)
     if current["dimension"] == "none" and slots.get("dimension") not in (None, "none"):
         current["dimension"] = slots["dimension"]
-    if current["period"] == "explicit":
+    if current["period"] == "explicit" and not hints and intent.period is None:
         for field in ("start_date", "end_date"):
             if current[field] is None:
                 current[field] = slots.get(field)
+    missing = current["missing_fields"]
+    if missing and "request" not in missing:
+        unresolved = [
+            field
+            for field in missing
+            if not current.get(field)
+            or (field == "period" and current[field] == "recently")
+        ]
+        current["missing_fields"] = unresolved
+        current["needs_clarification"] = bool(unresolved)
+        if not unresolved:
+            current["clarification_question"] = None
     return Intent.model_validate(current)
 
 
@@ -206,8 +222,14 @@ def answer(
                 request_id,
                 conversation_id,
             )
-        raw = client.interpret(body.question, prior["slots"] if prior else None, budget)
-        intent = merged_intent(raw, prior)
+        anchor = date.fromisoformat(request.app.state.readiness["data_as_of"])
+        context = {
+            "data_as_of": anchor.isoformat(),
+            "slots": prior["slots"] if prior else {},
+            "pending_question": prior.get("pending_question") if prior else None,
+        }
+        raw = client.interpret(body.question, context, budget)
+        intent = merged_intent(raw, prior, body.question)
         metric_id = intent.metric_id
         if metric_id:
             try:
@@ -242,7 +264,6 @@ def answer(
                 storage, conversation_id, user["id"], intent.model_dump(), question
             )
             return 200, response(outcome, question, request_id, conversation_id)
-        anchor = date.fromisoformat(request.app.state.readiness["data_as_of"])
         try:
             check_definition(intent, request.app.state.dictionary)
             plan, query_path, references = route_query(
@@ -275,7 +296,9 @@ def answer(
         result.update(
             table=rows,
             query_path=query_path,
-            answer_text=(factual(plan.metric_id, rows, plan.start, plan.end)),
+            answer_text=(
+                factual(plan.metric_id, rows, plan.start, plan.end, body.language)
+            ),
             sources={
                 "source": "Adventureworks",
                 "sql": plan.sql,

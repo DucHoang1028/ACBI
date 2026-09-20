@@ -57,6 +57,7 @@ class Intent(BaseModel):
     needs_clarification: bool
     clarification_question: str | None
     zero_scrap_only: bool
+    missing_fields: list[str] = Field(default_factory=list)
 
 
 INTENT_SCHEMA: dict[str, Any] = {
@@ -73,6 +74,21 @@ INTENT_SCHEMA: dict[str, Any] = {
         "needs_clarification": {"type": "boolean"},
         "clarification_question": {"type": ["string", "null"]},
         "zero_scrap_only": {"type": "boolean"},
+        "missing_fields": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "enum": [
+                    "metric_id",
+                    "period",
+                    "start_date",
+                    "end_date",
+                    "factory_id",
+                    "territory",
+                    "request",
+                ],
+            },
+        },
     },
     "required": [
         "metric_id",
@@ -86,6 +102,7 @@ INTENT_SCHEMA: dict[str, Any] = {
         "needs_clarification",
         "clarification_question",
         "zero_scrap_only",
+        "missing_fields",
     ],
     "additionalProperties": False,
 }
@@ -220,6 +237,18 @@ class GroqClient:
             "Unknown metrics or multiple metrics require clarification; never substitute. "
             "Dimensions: none, sales_territory, month, week, day, product, product_category, "
             "production_line, factory, scrap_reason. Dates are resolved by the backend. "
+            "Relative dates ALWAYS use context.data_as_of, never the wall clock. "
+            "'tháng này'=this_month, 'tháng trước'=last_month, 'quý này'=this_quarter, "
+            "'quý trước'=last_quarter, 'năm trước'=last_year. These are fully specified periods; "
+            "do not ask for month or year again. A quarter is three months, never a full year. "
+            "context.slots contains previous intent; context.pending_question is the last clarification. "
+            "A reply containing only a date retains the previous metric and filters. "
+            "Only ask for information still missing AFTER applying context. "
+            "missing_fields lists the missing slot names; use request for unsupported or ambiguous "
+            "business meaning (including multiple metrics). Return [] and needs_clarification=false "
+            "when resolved. Top 3 territories means dimension=sales_territory, limit=3, "
+            "not a request to name three territories. Comparing three unnamed territories without "
+            "a ranking criterion still requires clarification. "
             "Factory A=1, B=2, C=3. Revenue has no factory relationship. "
             "Missing period or vague 'recently' needs clarification, unless previous slots "
             "resolve it. Top N defaults to 100. Explicit end dates are exclusive. "
