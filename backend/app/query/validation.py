@@ -132,7 +132,17 @@ def scoped_source(
     conditions: list[str] = []
     if table == "sales.salesorderheader":
         conditions = ["orderdate>=:_scope_start", "orderdate<:_scope_end"]
-        if "territory" in params:
+        territory_params = sorted(
+            name for name in params if name.startswith("territory_")
+        )
+        if territory_params:
+            conditions.append(
+                "territoryid IN (SELECT territoryid FROM sales.salesterritory "
+                "WHERE name IN ("
+                + ",".join(f":{name}" for name in territory_params)
+                + "))"
+            )
+        elif "territory" in params:
             conditions.append(
                 "territoryid IN (SELECT territoryid FROM sales.salesterritory "
                 "WHERE name=:territory)"
@@ -480,8 +490,6 @@ def validate(
         }
         if factory is not None:
             expected_params["factory_id"] = factory
-        if intent.territory:
-            expected_params["territory"] = intent.territory
         if plan.metric_id in {"revenue", "sales_growth"}:
             expected_sql = sales_sql(intent, expected_params, plan.start)
         else:

@@ -97,7 +97,11 @@ def prepare(intent: Intent, role: str, anchor: date) -> QueryPlan:
     if factory_id is not None:
         params["factory_id"] = factory_id
     if intent.territory:
-        params["territory"] = intent.territory
+        territory_names = intent.territory.split("|")
+        if len(territory_names) == 1:
+            params["territory"] = intent.territory
+        else:
+            params.update({f"territory_{index}": name for index, name in enumerate(territory_names)})
     if intent.metric_id == "sales_growth":
         if intent.period not in {"last_month", "last_quarter"}:
             raise ValueError("Growth requires a complete previous month or quarter")
@@ -134,14 +138,30 @@ def sales_sql(intent: Intent, params: dict[str, Any], start: date) -> str:
         raise ValueError("Sales growth breakdown is not yet supported")
     if intent.zero_scrap_only:
         raise ValueError("Zero scrap only applies to defect rate")
-    if intent.territory:
-        params["territory"] = intent.territory
+    if intent.territory and not any(
+        name == "territory" or name.startswith("territory_") for name in params
+    ):
+        territory_names = intent.territory.split("|")
+        if len(territory_names) == 1:
+            params["territory"] = intent.territory
+        else:
+            params.update(
+                {
+                    f"territory_{index}": name
+                    for index, name in enumerate(territory_names)
+                }
+            )
     territory_join = (
         " JOIN sales.salesterritory t ON t.territoryid=h.territoryid"
         if intent.territory or dimension == "sales_territory"
         else ""
     )
-    territory_where = " AND t.name=:territory" if intent.territory else ""
+    if intent.territory and "|" in intent.territory:
+        territory_where = " AND t.name IN (" + ",".join(
+            f":territory_{index}" for index, _ in enumerate(intent.territory.split("|"))
+        ) + ")"
+    else:
+        territory_where = " AND t.name=:territory" if intent.territory else ""
     if metric == "sales_growth":
         if intent.period not in {"last_month", "last_quarter"}:
             raise ValueError("Growth requires a complete previous month or quarter")

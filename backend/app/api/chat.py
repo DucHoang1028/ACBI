@@ -17,7 +17,7 @@ from app.ai.budget import RequestBudget
 from app.ai.client import FakeLLM, Intent
 from app.api.auth import current_user
 from app.chat.service import audit, get_context, save_context
-from app.core.dates import date_hints
+from app.core.dates import intent_hints, is_confirmation
 from app.history.service import save as save_result
 from app.presentation.charts import TABLE, describe, validate_viz
 from app.presentation.summary import factual, numbers_match
@@ -44,7 +44,12 @@ def merged_intent(
 ) -> Intent:
     slots = dict((prior or {}).get("slots") or {})
     current = intent.model_dump()
-    hints = date_hints(question)
+    hints = intent_hints(question)
+    if not hints and is_confirmation(question):
+        for turn in reversed((prior or {}).get("turns") or []):
+            hints = intent_hints(turn.get("question", ""))
+            if hints:
+                break
     current.update(hints)
     for field in ("metric_id", "period", "factory_id", "territory"):
         if current[field] is None:
@@ -67,7 +72,24 @@ def merged_intent(
         current["needs_clarification"] = bool(unresolved)
         if not unresolved:
             current["clarification_question"] = None
+    if "metric_id" in hints and current.get("metric_id") and current.get("period") and (
+        current["period"] != "explicit"
+        or (current.get("start_date") and current.get("end_date"))
+    ):
+        current.update(
+            needs_clarification=False,
+            clarification_question=None,
+            missing_fields=[],
+        )
     return Intent.model_validate(current)
+
+
+def next_turns(
+    prior: dict[str, Any] | None, question: str, answer_text: str | None
+) -> list[dict[str, str]]:
+    turns = list((prior or {}).get("turns") or [])
+    turns.append({"question": question, "answer": answer_text or ""})
+    return turns[-6:]
 
 
 def run_query(
@@ -227,6 +249,7 @@ def answer(
             "data_as_of": anchor.isoformat(),
             "slots": prior["slots"] if prior else {},
             "pending_question": prior.get("pending_question") if prior else None,
+            "turns": (prior or {}).get("turns") or [],
         }
         raw = client.interpret(body.question, context, budget)
         intent = merged_intent(raw, prior, body.question)
@@ -246,7 +269,8 @@ def answer(
                 outcome = "needs_clarification"
                 question = str(error)
                 save_context(
-                    storage, conversation_id, user["id"], intent.model_dump(), question
+                    storage, conversation_id, user["id"], intent.model_dump(), question,
+                    next_turns(prior, body.question, question),
                 )
                 return 200, response(outcome, question, request_id, conversation_id)
         if (
@@ -261,7 +285,8 @@ def answer(
                 or "Which metric and reporting period do you mean?"
             )
             save_context(
-                storage, conversation_id, user["id"], intent.model_dump(), question
+                storage, conversation_id, user["id"], intent.model_dump(), question,
+                next_turns(prior, body.question, question),
             )
             return 200, response(outcome, question, request_id, conversation_id)
         try:
@@ -281,12 +306,16 @@ def answer(
             outcome = "needs_clarification"
             question = str(error)
             save_context(
-                storage, conversation_id, user["id"], intent.model_dump(), question
+                storage, conversation_id, user["id"], intent.model_dump(), question,
+                next_turns(prior, body.question, question),
             )
             return 200, response(outcome, question, request_id, conversation_id)
         rows = run_query(request.app.state.warehouse, plan, budget)
         outcome = "ok" if rows else "no_data"
-        save_context(storage, conversation_id, user["id"], intent.model_dump(), None)
+        save_context(
+            storage, conversation_id, user["id"], intent.model_dump(), None,
+            next_turns(prior, body.question, None),
+        )
         result = response(
             outcome,
             "Results found" if rows else "No data for this period",

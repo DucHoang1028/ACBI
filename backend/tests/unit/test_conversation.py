@@ -5,6 +5,8 @@ from app.ai.client import Intent
 from app.api.chat import merged_intent
 from app.core.dates import date_hints, resolve_period
 from app.presentation.summary import factual
+from app.query.builder import build
+from app.query.validation import validate
 
 
 def intent(**changes: object) -> Intent:
@@ -82,3 +84,33 @@ def test_vietnamese_summary_formats_actual_value_without_inventing_currency() ->
     )
     assert "1.234.567,89" in summary and "31/03/2025" in summary
     assert "đơn vị tiền tệ nguồn" in summary and "VND" not in summary
+
+
+def test_complete_comparisons_and_confirmations_do_not_require_date_templates() -> None:
+    query = "Cho tôi chart so sánh doanh thu tháng 5 và doanh thu tháng 6 năm 2025"
+    resolved = merged_intent(
+        intent(metric_id=None, missing_fields=["request"]), None, query
+    )
+    assert (resolved.metric_id, resolved.dimension) == ("revenue", "month")
+    assert (resolved.start_date, resolved.end_date) == ("2025-05-01", "2025-07-01")
+    prior = {"turns": [{"question": query, "answer": "Please confirm."}]}
+    confirmed = merged_intent(
+        intent(metric_id=None, missing_fields=["request"]), prior, "Đúng vậy"
+    )
+    assert not confirmed.needs_clarification and confirmed.dimension == "month"
+
+
+def test_year_and_two_territories_are_enough_information() -> None:
+    resolved = merged_intent(
+        intent(metric_id=None, missing_fields=["request"]),
+        None,
+        "So sánh doanh thu Canada và Northwest cả năm 2024",
+    )
+    assert (resolved.start_date, resolved.end_date) == ("2024-01-01", "2025-01-01")
+    assert resolved.dimension == "sales_territory"
+    assert resolved.territory == "Canada|Northwest"
+    plan = build(resolved, "manager", date(2025, 6, 29))
+    validated = validate(plan, resolved, "manager", trusted_template=True)
+    assert validated.params["territory_0"] == "Canada"
+    assert validated.params["territory_1"] == "Northwest"
+    assert ":territory_0" in validated.sql and ":territory_1" in validated.sql
