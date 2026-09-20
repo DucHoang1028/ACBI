@@ -271,3 +271,24 @@ def test_small_talk_does_not_replay_and_month_with_trailing_words() -> None:
 
     pair = intent_hints("doanh thu tháng 5 so với tháng 4 năm 2025")
     assert (pair["start_date"], pair["end_date"]) == ("2025-04-01", "2025-06-01")
+
+
+def test_transcript_keeps_every_turn_in_order() -> None:
+    from app.history.service import build_transcript
+
+    def saved(i: int, question: str) -> dict:
+        return {"id": f"r{i}", "question": question, "payload": {"table": []}}
+
+    results = [saved(1, "q1"), saved(2, "q2"), saved(3, "q3"), saved(4, "q4")]
+    # Context remembers only the newest turns; q1 is older than the window.
+    turns = [
+        {"question": "q2", "answer": ""},
+        {"question": "Doanh thu", "answer": "Which period?"},
+        {"question": "q3", "answer": ""},
+        {"question": "q4", "answer": ""},
+    ]
+    transcript = build_transcript(results, turns)
+    assert [t["question"] for t in transcript] == ["q1", "q2", "Doanh thu", "q3", "q4"]
+    assert transcript[2]["answer"]["status"] == "needs_clarification"
+    assert transcript[0]["answer"]["result_id"] == "r1"
+    assert build_transcript([], []) == []

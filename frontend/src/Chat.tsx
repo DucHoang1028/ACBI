@@ -26,7 +26,7 @@ export function Chat({access,enabled,advancedEnabled,anchor,language,role}:{acce
   async function loadHistory(){
     try{const r=await fetch('/api/conversations',{headers});if(!r.ok)throw Error();setHistory((await r.json()).conversations);setHistoryError(false);}catch{setHistoryError(true);}
   }
-  function newChat(){if(busy||recording)return;setTurns([]);setConversationId(null);setQuestion('');setNotice('');input.current?.focus();}
+  function newChat(){if(busy||recording)return;remember(null);setTurns([]);setConversationId(null);setQuestion('');setNotice('');input.current?.focus();}
   async function ask(event:React.FormEvent){
     event.preventDefault();const text=question.trim();if(!text||busy||recording)return;
     setTurns(previous=>[...previous,{question:text,answer:null}]);setQuestion('');setBusy(true);setNotice('');
@@ -35,13 +35,19 @@ export function Chat({access,enabled,advancedEnabled,anchor,language,role}:{acce
       const r=await fetch('/api/chat/ask',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({question:text,conversation_id:conversationId,language})});
       if(r.status===401)throw Error('session');
       result=await r.json();if(!result.status||!Array.isArray(result.table))throw Error();
-      if(result.status!=='technical_failure')setConversationId(result.conversation_id);
+      if(result.status!=='technical_failure'){setConversationId(result.conversation_id);remember(result.conversation_id);}
       if(result.saved)void loadHistory();
     }catch(error){result={status:'technical_failure',message:error instanceof Error&&error.message==='session'?(vi?'Phiên đăng nhập hết hạn. Tải lại trang để tiếp tục.':'Session expired. Reload to continue.'):(vi?'Không thể xử lý lúc này. Hãy thử lại sau ít phút.':'Unable to process now. Please try again shortly.'),answer_text:null,table:[],sources:null,conversation_id:conversationId||''};}
     setTurns(previous=>previous.map((turn,i)=>i===previous.length-1?{...turn,answer:result}:turn));setBusy(false);input.current?.focus();
   }
+  async function openConversation(id:string,quiet=false){
+    try{const r=await fetch(`/api/conversations/${encodeURIComponent(id)}`,{headers});if(!r.ok)throw Error();const data:{transcript:{question:string;answer:Answer}[]}=await r.json();if(!mounted.current||!data.transcript.length)throw Error();setTurns(data.transcript.map(t=>({question:t.question,answer:t.answer})));setConversationId(id);setQuestion('');if(!quiet)setNotice(vi?'Đã mở lại cuộc trò chuyện. Bạn có thể hỏi tiếp.':'Conversation reopened. You can continue it.');return true;}catch{remember(null);return false;}
+  }
+  function remember(id:string|null){try{if(id)localStorage.setItem('acbi_conversation',id);else localStorage.removeItem('acbi_conversation');}catch{/* storage may be unavailable */}}
+  useEffect(()=>{let id:string|null=null;try{id=localStorage.getItem('acbi_conversation');}catch{/* ignore */}if(id)void openConversation(id,true);},[]);
   async function openResult(item:Saved){
     if(busy||recording)return;
+    if(await openConversation(item.conversation_id))return;
     try{const r=await fetch(`/api/results/${encodeURIComponent(item.id)}`,{headers});if(!r.ok)throw Error();const answer:Answer=await r.json();setTurns([{question:item.question,answer}]);setConversationId(item.conversation_id);setQuestion('');setNotice(vi?'Đã mở kết quả đã lưu. Bạn có thể hỏi tiếp trong cuộc trò chuyện này.':'Saved result opened. You can continue this conversation.');}catch{setHistoryError(true);}
   }
   async function startRecording(){

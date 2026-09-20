@@ -171,10 +171,30 @@ def main() -> None:
         ):
             reshaped = ask("manager", wording, pie_direct["conversation_id"])
             assert reshaped["viz_config"]["type"] == kind, (wording, reshaped)
+
+        # Reopening a conversation restores every turn, in order, for its owner only.
+        reopened = client.get(
+            f"/api/conversations/{conversation}", headers=tokens["manager"]
+        )
+        assert reopened.status_code == 200, reopened.text
+        asked = [t["question"] for t in reopened.json()["transcript"]]
+        assert asked == [
+            SHARE,
+            "Đổi sang biểu đồ tròn",
+            "Hiển thị dạng bảng",
+            "Đổi sang biểu đồ phân tán",
+            "Đổi sang biểu đồ cột",
+            "Đổi sang biểu đồ vành khuyên",
+        ], asked
+        assert all(t["answer"]["saved"] for t in reopened.json()["transcript"])
+        foreign = client.get(
+            f"/api/conversations/{conversation}", headers=tokens["production_a"]
+        )
+        assert foreign.status_code == 404, foreign.status_code
         client.post("/api/auth/logout")
     print(
         "Follow-ups: territory list (scoped), Germany+UK share, stacked bar, KPI "
-        "card, pie, line, scatter and bar reconciled with reference SQL."
+        "card, pie, line, scatter and bar reconciled with reference SQL; reopened conversation restores every turn."
     )
 
 

@@ -105,6 +105,83 @@ def list_owned(engine: Engine, user_id: int, role: str) -> list[dict[str, Any]]:
     ]
 
 
+def conversation_results(
+    engine: Engine, user_id: int, conversation_id: str, role: str
+) -> list[dict[str, Any]]:
+    """Every saved result of one owned conversation, oldest first."""
+    with engine.connect() as connection:
+        rows = (
+            connection.execute(
+                text("""
+            SELECT id,domain,factory_id,question,payload FROM saved_results
+            WHERE user_id=:user_id AND conversation_id=:conversation_id
+            ORDER BY created_at ASC LIMIT 200
+            """),
+                {"user_id": user_id, "conversation_id": conversation_id},
+            )
+            .mappings()
+            .all()
+        )
+    return [dict(row) for row in rows if permitted(dict(row), role)]
+
+
+def build_transcript(
+    saved: list[dict[str, Any]], turns: list[dict[str, str]]
+) -> list[dict[str, Any]]:
+    """Saved answers in order, with clarification turns (never saved) between them.
+
+    The conversation context remembers only the last few turns; older saved
+    results are placed before them.
+    """
+
+    def answered(item: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(item["payload"])
+        payload.update(saved=True, result_id=item["id"])
+        return {"question": item["question"], "answer": payload}
+
+    def clarification(turn: dict[str, str]) -> dict[str, Any]:
+        return {
+            "question": turn["question"],
+            "answer": {
+                "status": "needs_clarification",
+                "message": turn["answer"],
+                "answer_text": None,
+                "table": [],
+                "viz_config": None,
+                "sources": None,
+                "saved": False,
+            },
+        }
+
+    first = next((t for t in turns if not t.get("answer")), None)
+    start = next(
+        (
+            i
+            for i, s in enumerate(saved)
+            if first and s["question"] == first["question"]
+        ),
+        len(saved),
+    )
+    transcript = [answered(s) for s in saved[:start]]
+    position = start
+    for turn in turns:
+        if turn.get("answer"):
+            transcript.append(clarification(turn))
+            continue
+        match = next(
+            (
+                i
+                for i in range(position, len(saved))
+                if saved[i]["question"] == turn["question"]
+            ),
+            None,
+        )
+        if match is not None:
+            transcript += [answered(s) for s in saved[position : match + 1]]
+            position = match + 1
+    return transcript + [answered(s) for s in saved[position:]]
+
+
 def get_owned(engine: Engine, result_id: str, user_id: int) -> dict[str, Any] | None:
     with engine.connect() as connection:
         row = (

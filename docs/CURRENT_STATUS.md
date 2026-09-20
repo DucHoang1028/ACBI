@@ -56,9 +56,11 @@ from GitHub. These accounts are not anonymous public-demo credentials.
    on page load and every 12 minutes while active, preserving the current chat.
    Browser sleep or a network outage can still interrupt renewal; reload or sign
    in again if needed. There is no automatic replay of a failed question.
-6. **History:** the UI exposes the latest saved result per conversation, based on
-   the most recent 200 saved results. Older turns are stored but are not fully
-   browsable in the UI. There is no pagination, search, or export workflow.
+6. **History:** reopening a saved conversation restores every saved answer in order,
+   plus clarification turns among the last six remembered. The last open conversation
+   is restored after a page reload. Denied and failed questions are not stored, so they
+   do not reappear. History holds at most 200 saved results per conversation and has no
+   search or export workflow.
 7. **Voice:** browser recording stops after 60 seconds and the backend accepts
    at most 10 MB. Real Vietnamese/English transcription quality has not been
    evaluated with user audio. Transcription currently uses a synchronous network

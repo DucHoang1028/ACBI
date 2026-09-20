@@ -5,7 +5,14 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.api.auth import current_user
-from app.history.service import get_owned, list_owned, permitted
+from app.chat.service import get_context
+from app.history.service import (
+    build_transcript,
+    conversation_results,
+    get_owned,
+    list_owned,
+    permitted,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -27,14 +34,17 @@ def conversation(
     request: Request,
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
-    results = [
-        item
-        for item in list_owned(request.app.state.storage, user["id"], user["role"])
-        if item["conversation_id"] == conversation_id
-    ]
-    if not results:
+    storage = request.app.state.storage
+    saved = conversation_results(storage, user["id"], conversation_id, user["role"])
+    context = get_context(storage, conversation_id, user["id"])
+    transcript = build_transcript(saved, (context or {}).get("turns") or [])
+    if not transcript:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    return {"conversation_id": conversation_id, "results": results}
+    return {
+        "conversation_id": conversation_id,
+        "results": [{"id": s["id"], "question": s["question"]} for s in saved],
+        "transcript": transcript,
+    }
 
 
 @router.get("/results/{result_id}")
