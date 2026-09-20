@@ -141,3 +141,14 @@ def test_shortcut_answers_are_role_gated() -> None:
     assert "production" not in SPECIAL_ROLES["coverage"]
     assert "sales" not in SPECIAL_ROLES["factories"]
     assert "it_admin" not in {r for roles in SPECIAL_ROLES.values() for r in roles}
+
+
+def test_growth_wording_maps_to_sales_growth() -> None:
+    from app.core.dates import intent_hints
+
+    for text in (
+        "Doanh thu tháng trước tăng bao nhiêu so với tháng liền trước?",
+        "Tăng trưởng doanh thu quý trước",
+    ):
+        assert intent_hints(text)["metric_id"] == "sales_growth"
+    assert intent_hints("Doanh thu tháng trước")["metric_id"] == "revenue"

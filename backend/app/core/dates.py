@@ -68,7 +68,11 @@ def intent_hints(question: str) -> dict[str, object]:
         if unicodedata.category(c) != "Mn"
     )
     hints: dict[str, object] = {**date_hints(question)}
-    if re.search(r"\b(?:tang truong|growth)\b", value) and re.search(
+    growth = (
+        r"\b(?:tang truong|growth|(?:tang|giam) bao nhieu"
+        r"|so voi (?:thang|quy|ky) (?:lien )?truoc)\b"
+    )
+    if re.search(growth, value) and re.search(
         r"\b(?:doanh thu|revenue|sales)\b", value
     ):
         hints["metric_id"] = "sales_growth"
