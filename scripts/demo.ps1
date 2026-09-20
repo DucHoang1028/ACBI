@@ -28,7 +28,7 @@ if ($Action -eq 'start' -and -not $tunnel) {
 }
 if (-not $tunnel) { Write-Output 'Public demo tunnel is not running.'; exit }
 if (Test-Path $logFile) {
-    $url = [regex]::Match((Get-Content $logFile -Raw), 'https://[a-z0-9-]+\.trycloudflare\.com').Value
+    $url = [regex]::Match([string](Get-Content $logFile -Raw), 'https://[a-z0-9-]+\.trycloudflare\.com').Value
     if ($url) { Write-Output $url; exit }
 }
 Write-Output 'Tunnel is starting. Run ./scripts/demo.ps1 status shortly.'

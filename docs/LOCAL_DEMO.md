@@ -26,7 +26,7 @@ renewed in the warehouse and copied to ACBI before expiry. A different hostname
 requires a matching certificate. Recreate the backend after renewal.
 
 Nginx explicitly supplies the HTTPS scheme to the unpublished backend so origin
-validation and Secure refresh cookies work. Authentication endpoints have a
+validation and Secure refresh cookies work. The login endpoint has a
 shared demo rate limit in addition to account lockout. Do not publish backend
 port 8000 or attach untrusted containers to its private network. Access the demo
 through its HTTPS URL; localhost HTTP login is intentionally incompatible with

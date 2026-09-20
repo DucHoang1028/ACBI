@@ -1,11 +1,12 @@
 # ACBI
 
-**[Open the live demo](https://setup-divx-freeware-acquired.trycloudflare.com)**
+**[Open the live demo](https://thereafter-revision-acids-climbing.trycloudflare.com)**
 
 This is the full application, hosted on the owner's PC. Login is required;
 request credentials from the owner. The temporary link works only while the PC,
 Docker, and tunnel are running and changes when the tunnel restarts.
 See [demo operation and verification](docs/LOCAL_DEMO.md).
+See [current components, role accounts, and limitations](docs/CURRENT_STATUS.md).
 
 Phase 4 of the AI-Powered Conversational Business Intelligence prototype. The local AdventureWorks PostgreSQL warehouse stays external to ACBI. Approved metrics, role-filtered questions, validated charts, saved results, editable voice transcripts, and local administration are available. The owner approved the documented Groq business context, and live advanced analysis is enabled locally.
 

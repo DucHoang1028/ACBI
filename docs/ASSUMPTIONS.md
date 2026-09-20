@@ -12,7 +12,7 @@ ACBI owns three containers, web/backend/db, and one named application-data volum
 
 **Local port conflict:** a separate Windows PostgreSQL process owns host port 5432. Both Windows localhost and the backend's `host.docker.internal:5432` reach that other service. A local-only Compose override connects the backend to the existing `adventureworks-for-postgres_default` network using `adventureworks-for-postgres-db-1:5432`. No existing service was stopped, and no warehouse Compose file was edited. The base deployment retains `host.docker.internal:5432`. The app database uses a distinct DNS alias to avoid the two databases' `db` aliases colliding.
 
-**Local transport exception:** the existing warehouse reports `ssl=off`. Local development therefore uses `WAREHOUSE_SSLMODE=disable` and loopback-only web access. Production must supply verified warehouse TLS and HTTPS termination. This local prototype is not a production deployment.
+**Transport:** the original local profile used disabled warehouse TLS. On 20 September 2026, warehouse TLS was enabled in its Docker data volume. The public demo profile now uses `verify-full` with the pinned warehouse certificate and HTTPS through Cloudflare. Its web origin stays loopback-only. The reference folder remains unchanged. See [demo configuration](LOCAL_DEMO.md); the base local environment alone still permits the original non-TLS development connection.
 
 ## Approved definitions
 
