@@ -4,7 +4,7 @@ import logging
 import re
 import unicodedata
 from dataclasses import replace
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Literal
 from uuid import uuid4
@@ -19,9 +19,10 @@ from app.ai.budget import RequestBudget
 from app.ai.client import FakeLLM, Intent
 from app.api.auth import current_user
 from app.chat.service import audit, get_context, save_context
-from app.core.dates import intent_hints, is_confirmation
+from app.core.dates import intent_hints, is_confirmation, is_share_question
+from app.history.service import latest_in_conversation
 from app.history.service import save as save_result
-from app.presentation.charts import TABLE, describe, validate_viz
+from app.presentation.charts import TABLE, VizConfig, describe, validate_viz
 from app.presentation.summary import factual, numbers_match
 from app.query.builder import authorize, build, prepare, supports
 from app.query.validation import (
@@ -111,6 +112,32 @@ SPECIAL_ROLES = {
     "factories": {"manager", "production"},
     "coverage": {"manager", "sales"},
     "factory_revenue": {"manager", "sales", "production"},
+    "territories": {"manager", "sales"},
+    "categories": {"manager", "sales", "production"},
+    "lines": {"manager", "production"},
+}
+METRIC_WORDS = (
+    r"\b(?:doanh thu|doanh so|revenue|sales|san luong|ty le|phe pham|"
+    r"scrap|defect|loi nhuan|profit|tang truong|growth|bao nhieu tien)\b"
+)
+LISTING = r"\b(?:tat ca|danh sach|liet ke|nhung|co nhung|dang co|list|all|which)\b"
+# (regex on the accent-free question, table label, SQL, plural noun vi/en)
+LISTS = {
+    "territories": (
+        r"\b(?:khu vuc|territor(?:y|ies)|regions?)\b",
+        "SELECT name AS territory FROM sales.salesterritory ORDER BY name",
+        ("khu vực", "sales territories"),
+    ),
+    "categories": (
+        r"\b(?:danh muc|nhom san pham|product categor(?:y|ies)|categories)\b",
+        "SELECT name AS category FROM production.productcategory ORDER BY name",
+        ("danh mục sản phẩm", "product categories"),
+    ),
+    "lines": (
+        r"\b(?:day chuyen|production lines?|line san xuat)\b",
+        "SELECT name AS production_line FROM production.location ORDER BY name",
+        ("dây chuyền sản xuất", "production lines"),
+    ),
 }
 
 
@@ -127,6 +154,10 @@ def special_kind(question: str) -> str | None:
         return "coverage"
     if asks_factory and re.search(r"\b(?:doanh thu|doanh so|revenue|sales)\b", value):
         return "factory_revenue"
+    if re.search(LISTING, value) and not re.search(METRIC_WORDS, value):
+        for kind, (pattern, _, _) in LISTS.items():
+            if re.search(pattern, value):
+                return kind
     return None
 
 
@@ -154,14 +185,25 @@ def special_response(
         result = response("needs_clarification", message, request_id, conversation_id)
         result["llm_calls"] = 0
         return result
-    sql = (
-        "SELECT name AS factory FROM acbi_demo.factory "
-        + ("WHERE factory_id = 1 " if role == "production" else "")
-        + "ORDER BY factory_id"
-        if kind == "factories"
-        else "SELECT EXTRACT(YEAR FROM orderdate)::int AS year,COUNT(*) AS orders "
-        "FROM sales.salesorderheader GROUP BY 1 ORDER BY 1"
-    )
+    if kind == "factories":
+        sql = (
+            "SELECT name AS factory FROM acbi_demo.factory "
+            + ("WHERE factory_id = 1 " if role == "production" else "")
+            + "ORDER BY factory_id"
+        )
+    elif kind == "coverage":
+        sql = (
+            "SELECT EXTRACT(YEAR FROM orderdate)::int AS year,COUNT(*) AS orders "
+            "FROM sales.salesorderheader GROUP BY 1 ORDER BY 1"
+        )
+    else:
+        sql = LISTS[kind][1]
+        if kind == "lines" and role == "production":
+            sql = (
+                "SELECT l.name AS production_line FROM production.location l "
+                "JOIN acbi_demo.location_factory lf USING(locationid) "
+                "WHERE lf.factory_id = 1 ORDER BY l.name"
+            )
     with engine.connect() as connection, connection.begin():
         connection.execute(text("SET TRANSACTION READ ONLY"))
         connection.execute(
@@ -175,12 +217,20 @@ def special_response(
             if vi
             else f"The database has {len(rows)} factories: {names}."
         )
-    else:
+    elif kind == "coverage":
         years = ", ".join(str(row["year"]) for row in rows)
         answer = (
             f"Dữ liệu đơn bán hàng có các năm: {years}."
             if vi
             else f"Sales-order data is available for: {years}."
+        )
+    else:
+        noun = LISTS[kind][2][0 if vi else 1]
+        names = ", ".join(str(next(iter(row.values()))) for row in rows)
+        answer = (
+            f"Có {len(rows)} {noun}: {names}."
+            if vi
+            else f"There are {len(rows)} {noun}: {names}."
         )
     result = response("ok", "Results found", request_id, conversation_id)
     result.update(
@@ -201,6 +251,110 @@ def special_response(
         llm_calls=0,
     )
     return result
+
+
+CHART_WORDS = r"\b(?:bieu do|chart|dang bang|as a table|table)\b"
+CHART_KINDS = {
+    "donut": r"\b(?:donut|vanh khuyen|hinh vanh)\b",
+    "pie": r"\b(?:tron|pie)\b",
+    "line": r"\b(?:duong|line)\b",
+    "bar": r"\b(?:cot|bar)\b",
+    "table": r"\b(?:bang|table)\b",
+}
+KIND_NAMES = {
+    "pie": ("biểu đồ tròn", "pie chart"),
+    "donut": ("biểu đồ vành khuyên", "donut chart"),
+    "line": ("biểu đồ đường", "line chart"),
+    "bar": ("biểu đồ cột", "bar chart"),
+    "table": ("bảng", "table"),
+}
+
+
+def reshape_kind(question: str) -> str | None:
+    """A pure display request, such as 'show that as a pie chart'."""
+    value = normalized(question)
+    if not re.search(CHART_WORDS, value) or re.search(METRIC_WORDS, value):
+        return None
+    return next(
+        (kind for kind, pattern in CHART_KINDS.items() if re.search(pattern, value)),
+        None,
+    )
+
+
+def auto_viz(kind: str, rows: list[dict[str, Any]]) -> VizConfig:
+    """Map existing result columns only; ids and sample counts are not values."""
+    columns = describe(rows)["columns"]
+    shown = [c for c in rows[0] if not c.lower().endswith("id") and c != "sample_count"]
+    x = next((c for c in shown if columns[c]["kind"] in {"category", "temporal"}), None)
+    y = [c for c in shown if columns[c]["kind"] == "numeric" and c != x]
+    if kind in {"pie", "donut"}:
+        y = y[:1]
+    return validate_viz(VizConfig(type=kind, x=x, y=y, series=None), rows)  # type: ignore[arg-type]
+
+
+def reshaped(
+    kind: str,
+    rows: list[dict[str, Any]],
+    language: str,
+) -> tuple[dict[str, Any], str]:
+    vi = language == "vi"
+    names = {k: v[0 if vi else 1] for k, v in KIND_NAMES.items()}
+    if kind == "table":
+        return TABLE.model_dump(), (
+            "Đã hiển thị kết quả trước dưới dạng bảng."
+            if vi
+            else "Showing the previous result as a table."
+        )
+    try:
+        return auto_viz(kind, rows).model_dump(), (
+            f"Đã hiển thị kết quả trước dưới dạng {names[kind]}."
+            if vi
+            else f"Showing the previous result as a {names[kind]}."
+        )
+    except ValueError:
+        pass
+    if kind != "bar":
+        try:
+            return auto_viz("bar", rows).model_dump(), (
+                f"Kết quả này không phù hợp với {names[kind]} (ví dụ quá nhiều nhóm), "
+                "nên tôi hiển thị dạng biểu đồ cột."
+                if vi
+                else f"This result does not fit a {names[kind]} (for example too many "
+                "categories), so I am showing a bar chart."
+            )
+        except ValueError:
+            pass
+    return TABLE.model_dump(), (
+        f"Kết quả này không phù hợp với {names[kind]}, nên tôi hiển thị dạng bảng."
+        if vi
+        else f"This result does not fit a {names[kind]}, so I am showing a table."
+    )
+
+
+def share_text(
+    rows: list[dict[str, Any]], names: list[str], start: date, end: date, language: str
+) -> str | None:
+    """Selected territories' share of total revenue, computed from result rows."""
+    try:
+        total = sum((Decimal(str(r["revenue"])) for r in rows), Decimal(0))
+        picked = [r for r in rows if r.get("territory") in names]
+        selected = sum((Decimal(str(r["revenue"])) for r in picked), Decimal(0))
+    except (KeyError, ArithmeticError):
+        return None
+    if total <= 0 or not picked:
+        return None
+    percent = (selected / total * 100).quantize(Decimal("0.01"))
+    label = ", ".join(str(r["territory"]) for r in picked)
+    last = end - timedelta(days=1)
+    if language == "vi":
+        return (
+            f"Doanh thu của {label} là {selected:,.2f}, chiếm {percent}% tổng doanh "
+            f"thu {total:,.2f} của tất cả khu vực ({start} đến {last})."
+        )
+    return (
+        f"Revenue for {label} is {selected:,.2f}, {percent}% of the {total:,.2f} "
+        f"total across all territories ({start} to {last})."
+    )
 
 
 def clarification_text(intent: Intent, language: str) -> str:
@@ -381,6 +535,56 @@ def answer(
                 conversation_id,
             )
         anchor = date.fromisoformat(request.app.state.readiness["data_as_of"])
+        target = reshape_kind(body.question)
+        if target:
+            latest = latest_in_conversation(
+                storage, user["id"], conversation_id, user["role"]
+            )
+            if latest is None or not latest["payload"].get("table"):
+                message = (
+                    "Chưa có kết quả nào để hiển thị lại. "
+                    "Hãy hỏi một câu về số liệu trước."
+                    if body.language == "vi"
+                    else "There is no earlier result to redisplay. "
+                    "Ask a data question first."
+                )
+                outcome = "needs_clarification"
+                return 200, response(outcome, message, request_id, conversation_id)
+            previous = latest["payload"]
+            viz, note = reshaped(target, previous["table"], body.language)
+            result = response("ok", "Results found", request_id, conversation_id)
+            result.update(
+                table=previous["table"],
+                sources=previous["sources"],
+                viz_config=viz,
+                chart_fallback=viz["type"] == "table",
+                answer_text=note,
+                llm_calls=0,
+            )
+            try:
+                result["result_id"] = save_result(
+                    storage,
+                    user["id"],
+                    body.question,
+                    latest["metric_id"],
+                    latest["factory_id"],
+                    result,
+                )
+                result["saved"] = True
+            except SQLAlchemyError:
+                logger.warning("Request %s result storage failed", request_id)
+                result["status"] = "partial"
+                result["message"] = "Answer ready, but saving failed"
+            save_context(
+                storage,
+                conversation_id,
+                user["id"],
+                (prior or {}).get("slots") or {},
+                None,
+                next_turns(prior, body.question, None),
+            )
+            outcome = result["status"]
+            return 200, result
         kind = special_kind(body.question)
         if kind:
             if user["role"] not in SPECIAL_ROLES[kind]:
@@ -420,6 +624,13 @@ def answer(
         raw = client.interpret(body.question, context, budget)
         intent = merged_intent(raw, prior, body.question)
         metric_id = intent.metric_id
+        share_of: list[str] | None = None
+        if intent.territory and is_share_question(body.question):
+            # Query every territory, then compute the share from the result rows.
+            share_of = intent.territory.split("|")
+            intent = intent.model_copy(
+                update={"territory": None, "dimension": "sales_territory"}
+            )
         if metric_id:
             try:
                 authorize(intent, user["role"])
@@ -505,7 +716,12 @@ def answer(
             table=rows,
             query_path=query_path,
             answer_text=(
-                factual(plan.metric_id, rows, plan.start, plan.end, body.language)
+                (
+                    share_of
+                    and plan.metric_id == "revenue"
+                    and share_text(rows, share_of, plan.start, plan.end, body.language)
+                )
+                or factual(plan.metric_id, rows, plan.start, plan.end, body.language)
             ),
             sources={
                 "source": "Adventureworks",

@@ -60,13 +60,37 @@ def date_hints(question: str) -> dict[str, str | None]:
     return {}
 
 
+TERRITORIES = {
+    "Canada": "canada",
+    "Northwest": "northwest",
+    "Northeast": "northeast",
+    "Central": "central",
+    "Southwest": "southwest",
+    "Southeast": "southeast",
+    "France": "france|phap",
+    "Germany": "germany|duc",
+    "Australia": "australia|uc",
+    "United Kingdom": "united kingdom|vuong quoc anh|nuoc anh|anh",
+}
+SHARE = r"phan tram|chiem bao nhieu|ty trong|share|percent"
+
+
+def is_share_question(question: str) -> bool:
+    value = "".join(
+        c
+        for c in unicodedata.normalize("NFD", question.lower())
+        if unicodedata.category(c) != "Mn"
+    ).replace("đ", "d")
+    return bool(re.search(rf"\b(?:{SHARE})\b", value))
+
+
 def intent_hints(question: str) -> dict[str, object]:
     """Recognize complete, common business requests before asking the model."""
     value = "".join(
         c
         for c in unicodedata.normalize("NFD", question.lower())
         if unicodedata.category(c) != "Mn"
-    )
+    ).replace("đ", "d")
     hints: dict[str, object] = {**date_hints(question)}
     growth = (
         r"\b(?:tang truong|growth|(?:tang|giam) bao nhieu"
@@ -104,23 +128,13 @@ def intent_hints(question: str) -> dict[str, object]:
                 )
     territories = [
         name
-        for name in (
-            "Canada",
-            "Northwest",
-            "Northeast",
-            "Central",
-            "Southwest",
-            "Southeast",
-            "France",
-            "Germany",
-            "Australia",
-            "United Kingdom",
-        )
-        if re.search(rf"\b{re.escape(name.lower())}\b", value)
+        for name, pattern in TERRITORIES.items()
+        if re.search(rf"\b(?:{pattern})\b", value)
     ]
-    if len(territories) >= 2 and re.search(r"\b(?:so sanh|compare)\b", value):
-        hints["dimension"] = "sales_territory"
-        hints["territory"] = "|".join(territories)
+    if territories and re.search(rf"\b(?:so sanh|compare|{SHARE})\b", value):
+        if len(territories) >= 2 or re.search(rf"\b(?:{SHARE})\b", value):
+            hints["dimension"] = "sales_territory"
+            hints["territory"] = "|".join(territories)
     return hints
 
 

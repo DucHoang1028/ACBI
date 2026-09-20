@@ -162,3 +162,37 @@ def test_multi_metric_and_month_pair_questions() -> None:
     pair = intent_hints("Doanh thu tháng 5 so với tháng 4 năm 2025")
     assert (pair["start_date"], pair["end_date"]) == ("2025-04-01", "2025-06-01")
     assert pair["dimension"] == "month"
+
+
+def test_listing_reshaping_and_share_questions() -> None:
+    from datetime import date
+
+    from app.api.chat import reshape_kind, reshaped, share_text, special_kind
+    from app.core.dates import intent_hints
+
+    assert special_kind("Cho tôi tất cả khu vực hiện tại đang có trong dữ liệu") == (
+        "territories"
+    )
+    assert special_kind("Cho tôi doanh thu của tất cả khu vực năm 2024") is None
+    assert special_kind("Liệt kê các dây chuyền sản xuất") == "lines"
+    assert reshape_kind("Đổi sang biểu đồ tròn") == "pie"
+    assert reshape_kind("Hiển thị dạng bảng") == "table"
+    assert reshape_kind("Cho tôi chart so sánh doanh thu tháng 5 và tháng 6") is None
+    hints = intent_hints("Doanh thu Đức và Anh chiếm bao nhiêu phần trăm năm 2023")
+    assert hints["territory"] == "Germany|United Kingdom"
+
+    rows = [
+        {
+            "territoryid": str(i),
+            "territory": f"T{i}",
+            "revenue": "100",
+            "sample_count": 1,
+        }
+        for i in range(10)
+    ]
+    text = share_text(rows, ["T1", "T2"], date(2023, 1, 1), date(2024, 1, 1), "vi")
+    assert text is not None and "20.00%" in text and "2023-12-31" in text
+    viz, note = reshaped("pie", rows, "vi")  # 10 groups: pie is not allowed
+    assert viz["type"] == "bar" and "biểu đồ cột" in note
+    assert viz["y"] == ["revenue"] and viz["x"] == "territory"
+    assert reshaped("table", rows, "en")[0]["type"] == "table"

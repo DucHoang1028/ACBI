@@ -43,8 +43,8 @@ export function ResultChart({config,rows,language}:{config:VizConfig|null;rows:R
     data=[...grouped.values()];
     series=categories.map((name,i)=>({key:`series_${i}`,name}));
   }
-  const axes=<><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey={x} type={config.type==='scatter'?'number':'category'} tick={{fontSize:12}}/>
-    <YAxis dataKey={config.type==='scatter'?metric:undefined} type="number" tick={{fontSize:12}} width={76}/><Tooltip/><Legend/></>;
+  const axes=<><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey={x} type={config.type==='scatter'?'number':'category'} interval={0} angle={-30} textAnchor="end" height={70} tick={{fontSize:11}}/>
+    <YAxis dataKey={config.type==='scatter'?metric:undefined} type="number" tick={{fontSize:12}} width={76} tickFormatter={(v:number)=>new Intl.NumberFormat(language==='vi'?'vi-VN':'en-US',{notation:'compact'}).format(v)}/><Tooltip/><Legend/></>;
   return <figure className="result-chart" aria-label={label(metric)}><figcaption>{label(metric)}</figcaption>
     <ResponsiveContainer width="100%" height={320}>
       {config.type==='pie'||config.type==='donut'?<PieChart><Pie data={data} dataKey={metric} nameKey={x}

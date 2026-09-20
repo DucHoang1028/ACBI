@@ -119,3 +119,23 @@ def get_owned(engine: Engine, result_id: str, user_id: int) -> dict[str, Any] | 
             .first()
         )
     return dict(row) if row else None
+
+
+def latest_in_conversation(
+    engine: Engine, user_id: int, conversation_id: str, role: str
+) -> dict[str, Any] | None:
+    """Newest saved result of the caller's own conversation, if still permitted."""
+    with engine.connect() as connection:
+        row = (
+            connection.execute(
+                text("""
+            SELECT id,metric_id,domain,factory_id,payload FROM saved_results
+            WHERE user_id=:user_id AND conversation_id=:conversation_id
+            ORDER BY created_at DESC LIMIT 1
+            """),
+                {"user_id": user_id, "conversation_id": conversation_id},
+            )
+            .mappings()
+            .first()
+        )
+    return dict(row) if row and permitted(dict(row), role) else None
