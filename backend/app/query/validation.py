@@ -532,7 +532,8 @@ def validate(
                 else int(literal.this) if literal.is_int else float(literal.this)
             )
         literal.replace(exp.Placeholder(this=literal_names[key]))
-    tree.set("limit", exp.Limit(expression=exp.Literal.number(min(intent.limit, 100))))
+    cap = 250 if intent.series_dimension != "none" else 100
+    tree.set("limit", exp.Limit(expression=exp.Literal.number(min(intent.limit, cap))))
     sql = tree.sql(dialect="postgres")
     # SQLAlchemy text() uses :name, whereas SQLGlot's Postgres output uses %(name)s.
     sql = re.sub(r"%\(([A-Za-z_][A-Za-z_0-9]*)\)s", r":\1", sql)

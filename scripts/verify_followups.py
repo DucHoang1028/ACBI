@@ -14,6 +14,11 @@ sys.path.insert(0, str(ROOT / "backend"))
 from app.ai.client import FakeLLM, Intent  # noqa: E402
 from app.main import app  # noqa: E402
 
+STACKED = "Doanh thu theo tháng và khu vực dạng cột chồng năm 2023"
+KPI = "Doanh thu năm 2023 dạng thẻ KPI"
+PIE = "Doanh thu theo danh mục sản phẩm năm 2023 dạng biểu đồ tròn"
+LINE = "Doanh thu theo tháng năm 2023 dạng biểu đồ đường"
+OUTPUT = "Sản lượng theo tháng và dây chuyền dạng cột chồng năm {year}"
 SHARE = "Nếu tính riêng doanh thu Đức và Anh thì nó chiếm bao nhiêu phần trăm năm 2023"
 
 
@@ -38,7 +43,29 @@ def main() -> None:
         }
     )
     with TestClient(app) as client:
-        app.state.llm = FakeLLM({SHARE: clarify})
+
+        def variant(**changes: object) -> Intent:
+            return Intent.model_validate({**clarify.model_dump(), **changes})
+
+        with app.state.warehouse.connect() as connection:
+            year = int(
+                connection.execute(
+                    text(
+                        "SELECT EXTRACT(YEAR FROM MAX(enddate)) FROM production.workorder"
+                    )
+                ).scalar_one()
+            )
+        output = OUTPUT.format(year=year)
+        app.state.llm = FakeLLM(
+            {
+                SHARE: clarify,
+                STACKED: clarify,
+                KPI: clarify,
+                output: variant(metric_id="production_output"),
+                PIE: variant(dimension="product_category"),
+                LINE: variant(dimension="month"),
+            }
+        )
         tokens = {}
         for user in ("manager", "production_a"):
             login = client.post(
@@ -97,10 +124,57 @@ def main() -> None:
         assert table["viz_config"]["type"] == "table" and table["saved"], table
         lonely = ask("manager", "Đổi sang biểu đồ tròn")
         assert lonely["status"] == "needs_clarification", lonely
+
+        # Every chart type in the proposal, on real data, checked against SQL.
+        def reference_total(sql: str, **params: object) -> Decimal:
+            with app.state.warehouse.connect() as connection:
+                return Decimal(str(connection.execute(text(sql), params).scalar_one()))
+
+        bounds = {"s": date(2023, 1, 1), "e": date(2024, 1, 1)}
+        revenue_2023 = reference_total(
+            "SELECT SUM(subtotal) FROM sales.salesorderheader "
+            "WHERE orderdate>=:s AND orderdate<:e",
+            **bounds,
+        )
+        stacked = ask("manager", STACKED)
+        assert stacked["status"] == "ok", stacked
+        viz = stacked["viz_config"]
+        assert viz["type"] == "stacked_bar" and viz["series"] == "territory", viz
+        assert abs(
+            sum(Decimal(str(r["revenue"])) for r in stacked["table"]) - revenue_2023
+        ) < Decimal("0.05"), "stacked rows must sum to the reference total"
+        stacked_production = ask("manager", output)
+        assert stacked_production["status"] == "ok", stacked_production
+        assert stacked_production["viz_config"]["type"] == "stacked_bar", (
+            stacked_production["viz_config"]
+        )
+        kpi = ask("manager", KPI)
+        assert kpi["viz_config"]["type"] == "kpi_card" and len(kpi["table"]) == 1, kpi
+        assert abs(Decimal(str(kpi["table"][0]["revenue"])) - revenue_2023) < Decimal(
+            "0.01"
+        )
+        pie_direct = ask("manager", PIE)
+        assert pie_direct["viz_config"]["type"] == "pie", pie_direct
+        line = ask("manager", LINE)
+        assert line["viz_config"]["type"] == "line", line
+        for wording, kind in (
+            ("Đổi sang biểu đồ phân tán", "scatter"),
+            ("Đổi sang biểu đồ cột", "bar"),
+            ("Đổi sang biểu đồ vành khuyên", "bar"),  # 10 groups: too many
+        ):
+            reshaped = ask("manager", wording, share["conversation_id"])
+            assert reshaped["viz_config"]["type"] == kind, (wording, reshaped)
+        for wording, kind in (
+            ("Đổi sang biểu đồ tròn", "pie"),
+            ("Đổi sang biểu đồ vành khuyên", "donut"),
+            ("Đổi sang biểu đồ đường", "bar"),  # categories are not ordered
+        ):
+            reshaped = ask("manager", wording, pie_direct["conversation_id"])
+            assert reshaped["viz_config"]["type"] == kind, (wording, reshaped)
         client.post("/api/auth/logout")
     print(
-        "Follow-ups: territory list (scoped), Germany+UK share reconciled with "
-        "reference SQL, redisplay as bar/table, no LLM calls."
+        "Follow-ups: territory list (scoped), Germany+UK share, stacked bar, KPI "
+        "card, pie, line, scatter and bar reconciled with reference SQL."
     )
 
 

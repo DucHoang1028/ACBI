@@ -196,3 +196,35 @@ def test_listing_reshaping_and_share_questions() -> None:
     assert viz["type"] == "bar" and "biểu đồ cột" in note
     assert viz["y"] == ["revenue"] and viz["x"] == "territory"
     assert reshaped("table", rows, "en")[0]["type"] == "table"
+
+
+def test_all_chart_types_are_recognised_and_mapped() -> None:
+    from app.api.chat import auto_viz, requested_chart
+    from app.core.dates import intent_hints
+
+    asks = {
+        "Doanh thu theo danh mục dạng biểu đồ tròn": "pie",
+        "Đổi sang biểu đồ vành khuyên": "donut",
+        "Biểu đồ cột chồng doanh thu": "stacked_bar",
+        "Vẽ biểu đồ phân tán": "scatter",
+        "Hiển thị dạng thẻ KPI": "kpi_card",
+        "Doanh thu theo tháng dạng biểu đồ đường": "line",
+        "Sản lượng theo production line": None,
+    }
+    for text, kind in asks.items():
+        assert requested_chart(text) == kind, text
+    pair = intent_hints("Doanh thu theo tháng và khu vực dạng cột chồng năm 2024")
+    assert (pair["dimension"], pair["series_dimension"]) == ("month", "sales_territory")
+
+    rows = [
+        {"month": f"2024-0{m}-01", "territory": t, "revenue": "10", "sample_count": 2}
+        for m in (1, 2)
+        for t in ("A", "B")
+    ]
+    stacked = auto_viz("stacked_bar", rows)
+    assert (stacked.x, stacked.series, stacked.y) == ("month", "territory", ["revenue"])
+    assert auto_viz("scatter", rows).x == "sample_count"
+    import pytest
+
+    with pytest.raises(ValueError):
+        auto_viz("kpi_card", rows)  # four rows, not one value

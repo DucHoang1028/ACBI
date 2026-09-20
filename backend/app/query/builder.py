@@ -191,6 +191,17 @@ SELECT current_revenue,previous_revenue,
  (current_revenue-previous_revenue)/NULLIF(previous_revenue,0) AS sales_growth
 FROM periods WHERE current_count>0 AND previous_count>0 LIMIT :limit
 """
+    if intent.series_dimension != "none":
+        if (metric, dimension, intent.series_dimension) != (
+            "revenue",
+            "month",
+            "sales_territory",
+        ):
+            raise ValueError("This combination of breakdowns is not approved")
+        return f"""SELECT date_trunc('month',h.orderdate)::date AS month,t.name AS territory,SUM(h.subtotal) AS revenue,COUNT(*) AS sample_count
+FROM sales.salesorderheader h JOIN sales.salesterritory t ON t.territoryid=h.territoryid
+WHERE h.orderdate>=:start AND h.orderdate<:end{territory_where}
+GROUP BY 1,2 ORDER BY 1,2 LIMIT :limit"""
     if dimension in {"product", "product_category"}:
         selected = (
             "p.productid,p.name AS product"
@@ -254,6 +265,16 @@ def production_sql(
         raise ValueError("Unsupported production dimension")
     if intent.zero_scrap_only and (metric != "defect_rate" or dimension != "product"):
         raise ValueError("Zero-scrap filter requires defect rate by product")
+    series = intent.series_dimension
+    stack_dims = {"production_line", "factory", "product_category"}
+    if series != "none" and (
+        metric != "production_output"
+        or series not in stack_dims
+        or dimension not in stack_dims | {"month"}
+        or dimension == series
+    ):
+        raise ValueError("This combination of breakdowns is not approved")
+    dims = {dimension, series}
     if factory_id is not None:
         params["factory_id"] = factory_id
     where = "w.enddate>=:start AND w.enddate<:end"
@@ -286,15 +307,15 @@ def production_sql(
         ),
     }
     selected, group, order = fields[dimension]
-    if dimension in {"product", "product_category"}:
+    if dims & {"product", "product_category"}:
         joins += " JOIN production.product p ON p.productid=w.productid"
-    if dimension == "product_category":
+    if "product_category" in dims:
         joins += " LEFT JOIN production.productsubcategory ps ON ps.productsubcategoryid=p.productsubcategoryid LEFT JOIN production.productcategory pc ON pc.productcategoryid=ps.productcategoryid"
-    if dimension == "production_line":
+    if "production_line" in dims:
         joins += " LEFT JOIN production.location l ON l.locationid=w.locationid"
-    if dimension == "factory":
+    if "factory" in dims:
         joins += " LEFT JOIN acbi_demo.factory f ON f.factory_id=w.factory_id"
-    if dimension == "scrap_reason":
+    if "scrap_reason" in dims:
         joins += (
             " LEFT JOIN production.scrapreason s ON s.scrapreasonid=w.scrapreasonid"
         )
@@ -306,6 +327,12 @@ def production_sql(
             value += (
                 ",SUM(w.orderqty) AS ordered_units,SUM(w.scrappedqty) AS scrapped_units"
             )
+    if series != "none":
+        s2, g2, _ = fields[series]
+        return (
+            TERMINAL
+            + f"SELECT {selected},{s2},{value} FROM fact w{joins} WHERE {where} GROUP BY {group},{g2} ORDER BY {group},{g2} LIMIT :limit"
+        )
     if dimension == "none":
         return (
             TERMINAL

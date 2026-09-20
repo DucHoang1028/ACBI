@@ -75,6 +75,29 @@ TERRITORIES = {
 SHARE = r"phan tram|chiem bao nhieu|ty trong|share|percent"
 
 
+STACK = r"\b(?:xep chong|cot chong|stacked)\b"
+DIMENSION_WORDS = {
+    "month": r"(?:theo|moi|hang|tung) thang|by month|monthly",
+    "sales_territory": r"khu vuc|territor(?:y|ies)|regions?",
+    "product_category": r"danh muc|categor(?:y|ies)",
+    "production_line": r"day chuyen|production lines?",
+    "factory": r"nha may|factory|factories",
+}
+
+
+def stacked_dimensions(value: str) -> tuple[str, str] | None:
+    """Two breakdowns named in order, e.g. 'by month and territory'."""
+    found = sorted(
+        (match.start(), name)
+        for name, pattern in DIMENSION_WORDS.items()
+        if (match := re.search(rf"\b(?:{pattern})\b", value))
+    )
+    if len(found) < 2:
+        return None
+    first, second = found[0][1], found[1][1]
+    return (second, first) if second == "month" else (first, second)
+
+
 def is_share_question(question: str) -> bool:
     value = "".join(
         c
@@ -126,6 +149,8 @@ def intent_hints(question: str) -> dict[str, object]:
                     start_date=start.isoformat(),
                     end_date=month_start(start, 2).isoformat(),
                 )
+    if re.search(STACK, value) and (pair := stacked_dimensions(value)):
+        hints.update(dimension=pair[0], series_dimension=pair[1], limit=250)
     territories = [
         name
         for name, pattern in TERRITORIES.items()
