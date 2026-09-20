@@ -3,15 +3,14 @@
 
 import json
 import logging
-import threading
 import time
-from collections import deque
 from typing import Any, Protocol, TypeVar
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.ai.budget import RequestBudget
+from app.ai.keys import KeyPool
 from app.core.config import Settings
 from app.presentation.charts import TABLE, VizConfig
 
@@ -214,16 +213,15 @@ ModelT = TypeVar("ModelT", bound=BaseModel)
 
 class GroqClient:
     def __init__(self, settings: Settings):
-        self.key = settings.groq_api_key.get_secret_value()
+        self.pool = KeyPool(
+            settings.groq_keys(),
+            settings.llm_requests_per_minute,
+            settings.llm_tokens_per_minute,
+        )
         self.model = settings.llm_model
-        self.rpm = settings.llm_requests_per_minute
-        self.tpm = settings.llm_tokens_per_minute
         self.max_calls = settings.llm_max_calls_per_request
         self.deadline = settings.request_timeout_seconds
         self.regenerations = settings.llm_max_regenerations
-        self.lock = threading.Lock()
-        self.calls: deque[list[float]] = deque()
-        self.cooldown_until = 0.0
 
     def interpret(
         self,
@@ -258,7 +256,9 @@ class GroqClient:
             "when resolved. Top 3 territories means dimension=sales_territory, limit=3, "
             "not a request to name three territories. Comparing three unnamed territories without "
             "a ranking criterion still requires clarification. "
-            "Factory A=1, B=2, C=3. Revenue has no factory relationship. "
+            "Factory A=1, B=2, C=3; any other factory name is unknown, so ask. Revenue has no factory relationship. "
+            "Use dimension=none unless the question asks for a breakdown (theo, by, per, each, top N). "
+            "Territory names are the English names Canada, Northwest, Northeast, Central, Southwest, Southeast, France, Germany, Australia, United Kingdom; translate Vietnamese names such as Đức, Pháp, Anh, Úc. "
             "Missing period or vague 'recently' needs clarification, unless previous slots "
             "resolve it. Top N defaults to 100. Explicit end dates are exclusive. "
             "Keep a known metric even when another detail is missing. Never generate SQL. "
@@ -273,6 +273,7 @@ class GroqClient:
             system,
             {"question": question, "context": context or {}},
             budget,
+            max_tokens=700,
         )
 
     def sql_candidate(
@@ -314,6 +315,7 @@ class GroqClient:
                 "correction": error,
             },
             budget,
+            max_tokens=1200,
         )
 
     def visualize(
@@ -344,6 +346,7 @@ class GroqClient:
                 "correction": error,
             },
             budget,
+            max_tokens=500,
         )
 
     def summarize(
@@ -362,6 +365,7 @@ class GroqClient:
             system,
             {"question": question, "rows": rows},
             budget,
+            max_tokens=500,
         )
         return result.text
 
@@ -373,13 +377,14 @@ class GroqClient:
         system: str,
         data: dict[str, Any],
         budget: RequestBudget,
+        max_tokens: int = 700,
     ) -> ModelT:
-        if not self.key:
+        if not len(self.pool):
             raise RuntimeError("Groq API key is not configured")
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "temperature": 0,
-            "max_completion_tokens": 1800,
+            "max_completion_tokens": max_tokens,
             "messages": [
                 {"role": "system", "content": system},
                 {
@@ -401,67 +406,94 @@ class GroqClient:
         }
         if self.model.startswith("openai/gpt-oss-"):
             payload["reasoning_effort"] = "low"
-        estimated = (len(json.dumps(payload).encode("utf-8")) // 3) + 1800
         for attempt in range(self.regenerations + 1):
-            with self.lock:
-                now = time.monotonic()
-                while self.calls and self.calls[0][0] <= now - 60:
-                    self.calls.popleft()
-                if (
-                    now < self.cooldown_until
-                    or len(self.calls) >= self.rpm
-                    or sum(n for _, n in self.calls) + estimated > self.tpm
-                ):
-                    raise RuntimeError("Groq local rate budget exhausted")
-                budget.consume()
-                reservation = [now, float(estimated)]
-                self.calls.append(reservation)
-            try:
-                with httpx.Client(timeout=min(10, budget.remaining() / 4)) as client:
-                    response = client.post(
-                        "https://api.groq.com/openai/v1/chat/completions",
-                        headers={"Authorization": f"Bearer {self.key}"},
-                        json=payload,
-                    )
-                if response.status_code == 429:
-                    with self.lock:
-                        self.cooldown_until = time.monotonic() + max(
-                            1, float(response.headers.get("retry-after", "60"))
+            # A truncated answer is retried with more room for the reply.
+            payload["max_completion_tokens"] = min(2400, max_tokens * (attempt + 1))
+            estimated = (len(json.dumps(payload).encode("utf-8")) // 3) + payload[
+                "max_completion_tokens"
+            ]
+            # One logical call, however many keys it has to try.
+            budget.consume()
+            error: Exception | None = None
+            keys = self.pool.available(estimated)
+            if not keys:
+                raise RuntimeError("Groq local rate budget exhausted")
+            for state in keys:
+                reservation = self.pool.reserve(state, estimated)
+                try:
+                    with httpx.Client(
+                        timeout=min(10, budget.remaining() / 4)
+                    ) as client:
+                        response = client.post(
+                            "https://api.groq.com/openai/v1/chat/completions",
+                            headers={"Authorization": f"Bearer {state.key}"},
+                            json=payload,
                         )
-                response.raise_for_status()
-                result = response.json()
-                with self.lock:
-                    reservation[1] = float(
-                        result.get("usage", {}).get("total_tokens", estimated)
+                    response.raise_for_status()
+                    result = response.json()
+                    headers = response.headers
+                    self.pool.succeeded(
+                        state,
+                        reservation,
+                        result.get("usage", {}).get("total_tokens"),
+                        _header_int(headers, "x-ratelimit-limit-requests"),
+                        _header_int(headers, "x-ratelimit-limit-tokens"),
                     )
-                    for header, attribute in (
-                        ("x-ratelimit-limit-requests", "rpm"),
-                        ("x-ratelimit-limit-tokens", "tpm"),
-                    ):
-                        value = response.headers.get(header)
-                        if value and value.isdigit():
-                            setattr(
-                                self,
-                                attribute,
-                                min(getattr(self, attribute), int(value)),
-                            )
-                budget.remaining()
-                return model_type.model_validate_json(
-                    result["choices"][0]["message"]["content"]
-                )
-            except (httpx.TransportError, httpx.HTTPStatusError, ValueError) as error:
-                retryable = (
-                    not isinstance(error, httpx.HTTPStatusError)
-                    or error.response.status_code >= 500
-                )
-                if (
-                    not retryable
-                    or attempt >= self.regenerations
-                    or budget.calls >= budget.max_calls
-                ):
-                    raise
-                delay = 0.25 * (2**attempt)
-                if budget.remaining() <= delay + 1:
-                    raise
-                time.sleep(delay)
+                    budget.remaining()
+                    logger.info(
+                        "llm %s answered by %s (%s tokens)",
+                        name,
+                        state.label,
+                        result.get("usage", {}).get("total_tokens"),
+                    )
+                    return model_type.model_validate_json(
+                        result["choices"][0]["message"]["content"]
+                    )
+                except httpx.HTTPStatusError as failure:
+                    status = failure.response.status_code
+                    if status in (400, 404, 413, 422):
+                        raise  # the request itself is wrong; another key cannot help
+                    retry_after = _retry_after(failure.response.headers)
+                    self.pool.failed(state, status, retry_after)
+                    logger.warning(
+                        "llm %s failed on %s: HTTP %s; trying next key",
+                        name,
+                        state.label,
+                        status,
+                    )
+                    error = failure
+                except httpx.TransportError as failure:
+                    self.pool.failed(state, None, None)
+                    logger.warning(
+                        "llm %s failed on %s: transport error; trying next key",
+                        name,
+                        state.label,
+                    )
+                    error = failure
+                except ValueError as failure:
+                    # Malformed model output is not a key problem: regenerate.
+                    error = failure
+                    break
+            if error is None:
+                continue
+            if not isinstance(error, ValueError):
+                raise error  # every usable key failed
+            if attempt >= self.regenerations or budget.calls >= budget.max_calls:
+                raise error
+            delay = 0.25 * (2**attempt)
+            if budget.remaining() <= delay + 1:
+                raise error
+            time.sleep(delay)
         raise RuntimeError("No valid model response")
+
+
+def _header_int(headers: httpx.Headers, name: str) -> int | None:
+    value = headers.get(name)
+    return int(value) if value and value.isdigit() else None
+
+
+def _retry_after(headers: httpx.Headers) -> float | None:
+    try:
+        return float(headers.get("retry-after", ""))
+    except ValueError:
+        return None

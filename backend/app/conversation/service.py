@@ -1,4 +1,4 @@
-"""User-owned conversation slots and denial audit."""
+"""Conversation Management: user-owned slots, turns and pending clarifications."""
 
 import json
 from typing import Any
@@ -21,16 +21,6 @@ def migrate(engine: Engine) -> None:
         connection.execute(text("""
             ALTER TABLE chat_context ADD COLUMN IF NOT EXISTS turns jsonb NOT NULL
             DEFAULT '[]'::jsonb
-        """))
-        connection.execute(text("""
-            CREATE TABLE IF NOT EXISTS access_audit (
-                id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-                user_id bigint NOT NULL REFERENCES app_users(id),
-                request_id text NOT NULL,
-                outcome text NOT NULL,
-                metric_id text,
-                created_at timestamptz NOT NULL DEFAULT now()
-            )
         """))
 
 
@@ -80,19 +70,9 @@ def save_context(
         )
 
 
-def audit(
-    engine: Engine, user_id: int, request_id: str, outcome: str, metric_id: str | None
-) -> None:
-    with engine.begin() as connection:
-        connection.execute(
-            text("""
-            INSERT INTO access_audit(user_id,request_id,outcome,metric_id)
-            VALUES (:user_id,:request_id,:outcome,:metric_id)
-        """),
-            {
-                "user_id": user_id,
-                "request_id": request_id,
-                "outcome": outcome,
-                "metric_id": metric_id,
-            },
-        )
+def next_turns(
+    prior: dict[str, Any] | None, question: str, answer_text: str | None
+) -> list[dict[str, str]]:
+    turns = list((prior or {}).get("turns") or [])
+    turns.append({"question": question, "answer": answer_text or ""})
+    return turns[-6:]

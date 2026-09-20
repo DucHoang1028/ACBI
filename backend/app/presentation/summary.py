@@ -75,3 +75,29 @@ def numbers_match(summary: str, rows: list[dict[str, Any]]) -> bool:
         )
         for value in numbers
     )
+
+
+def share_text(
+    rows: list[dict[str, Any]], names: list[str], start: date, end: date, language: str
+) -> str | None:
+    """Selected territories' share of total revenue, computed from result rows."""
+    try:
+        total = sum((Decimal(str(r["revenue"])) for r in rows), Decimal(0))
+        picked = [r for r in rows if r.get("territory") in names]
+        selected = sum((Decimal(str(r["revenue"])) for r in picked), Decimal(0))
+    except (KeyError, ArithmeticError):
+        return None
+    if total <= 0 or not picked:
+        return None
+    percent = (selected / total * 100).quantize(Decimal("0.01"))
+    label = ", ".join(str(r["territory"]) for r in picked)
+    last = end - timedelta(days=1)
+    if language == "vi":
+        return (
+            f"Doanh thu của {label} là {selected:,.2f}, chiếm {percent}% tổng doanh "
+            f"thu {total:,.2f} của tất cả khu vực ({start} đến {last})."
+        )
+    return (
+        f"Revenue for {label} is {selected:,.2f}, {percent}% of the {total:,.2f} "
+        f"total across all territories ({start} to {last})."
+    )

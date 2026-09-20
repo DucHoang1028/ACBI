@@ -102,6 +102,26 @@ def stacked_dimensions(value: str) -> tuple[str, str] | None:
     return (second, first) if second == "month" else (first, second)
 
 
+METRIC_WORDS = (
+    r"(?<![\w.])(?:doanh thu|doanh so|revenue|sales|san luong|ty le|phe pham|"
+    r"scrap|defect|loi nhuan|profit|tang truong|growth|bao nhieu tien)(?![\w.])"
+)
+
+
+def territory_names(value: str) -> list[str] | None:
+    """Canonical territory names found in free text; None when some word is unknown."""
+    folded = fold(value)
+    names = [
+        name
+        for name, pattern in TERRITORIES.items()
+        if re.search(rf"\b(?:{pattern})\b", folded)
+    ]
+    for pattern in TERRITORIES.values():
+        folded = re.sub(rf"\b(?:{pattern})\b", " ", folded)
+    leftover = re.sub(r"\b(?:va|and|voi|,|&)\b|[|,&]", " ", folded).split()
+    return names if names and not leftover else None
+
+
 def fold(question: str) -> str:
     """Lowercase, accent-free text for keyword matching."""
     return "".join(
@@ -152,7 +172,7 @@ def intent_hints(question: str) -> dict[str, object]:
         r"|so voi (?:thang|quy|ky) (?:lien )?truoc)\b"
     )
     found: list[str] = []
-    if re.search(r"\b(?:doanh thu|doanh so|revenue|sales)\b", value):
+    if re.search(r"(?<![\w.])(?:doanh thu|doanh so|revenue|sales)(?![\w.])", value):
         found.append("sales_growth" if re.search(growth, value) else "revenue")
     if re.search(r"\b(?:san luong|san xuat|production output)\b", value):
         found.append("production_output")

@@ -15,7 +15,7 @@ jobs:
       - run: ruff check backend/app backend/tests scripts
       - run: black --check backend/app backend/tests scripts
       - run: mypy backend/app
-      - run: pytest backend/tests/unit -q
+      - run: pytest backend/tests -q
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

@@ -1,7 +1,7 @@
 PYTHON ?= python
 COMPOSE_EXTRA ?= -f deploy/docker-compose.local.yml
 COMPOSE = docker compose --env-file deploy/.env -f deploy/docker-compose.yml $(COMPOSE_EXTRA)
-.PHONY: up down test eval seed
+.PHONY: up down test eval eval-groq seed
 up:
 	$(COMPOSE) up -d --build --wait
 down:
@@ -14,3 +14,6 @@ eval:
 	docker cp acbi-backend-1:/tmp/acbi-phase0/data/eval/results.local.json data/eval/results.local.json
 seed:
 	$(PYTHON) scripts/prepare_warehouse.py
+
+eval-groq:
+	$(COMPOSE) exec -T backend python scripts/eval_groq.py --suite all < deploy/seed-credentials.txt

@@ -122,7 +122,8 @@ def main() -> None:
         report["no_data_not_zero"] = True
 
         with patch(
-            "app.api.chat.save_result", side_effect=SQLAlchemyError("simulated")
+            "app.query.orchestrator.save_result",
+            side_effect=SQLAlchemyError("simulated"),
         ):
             partial = client.post(
                 "/api/chat/ask",
@@ -229,6 +230,8 @@ def main() -> None:
         report["qs7_p95_seconds"] = round(latencies[4], 3)
         assert latencies[4] < 15
 
+        # QS8 exercises the model path, so the local shortcut must not answer first.
+        app.state.settings.local_intent_enabled = False
         app.state.llm = TimedOutLLM()
         started = time.monotonic()
         ai_failure = client.post(
@@ -239,6 +242,7 @@ def main() -> None:
         assert ai_failure.status_code == 503
         assert ai_failure.json()["status"] == "technical_failure"
         assert time.monotonic() - started < 30
+        app.state.settings.local_intent_enabled = True
         app.state.llm = fake
         warehouse = app.state.warehouse
         app.state.warehouse = BrokenWarehouse()

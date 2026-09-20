@@ -7,10 +7,11 @@ from types import SimpleNamespace
 import pytest
 from app.ai.budget import RequestBudget
 from app.ai.client import FakeLLM, Intent, SQLCandidate
-from app.api.chat import chart, route_query
 from app.metadata.retrieval import BM25Retriever
 from app.presentation.charts import VizConfig, validate_viz
+from app.presentation.visualization import chart
 from app.query.builder import prepare
+from app.query.orchestrator import route_query
 from app.query.validation import SQLPolicyError, validate
 
 ANCHOR = date(2025, 6, 29)

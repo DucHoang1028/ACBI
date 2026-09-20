@@ -1,4 +1,4 @@
-"""User-owned saved answers; role and factory scope are rechecked on read."""
+"""History and Audit: saved answers, traceability and the access audit log."""
 
 import json
 from typing import Any
@@ -29,6 +29,16 @@ def migrate(engine: Engine) -> None:
             CREATE INDEX IF NOT EXISTS saved_results_owner_time
             ON saved_results(user_id,created_at DESC)
         """))
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS access_audit (
+                id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                user_id bigint NOT NULL REFERENCES app_users(id),
+                request_id text NOT NULL,
+                outcome text NOT NULL,
+                metric_id text,
+                created_at timestamptz NOT NULL DEFAULT now()
+            )
+        """))
 
 
 def permitted(row: dict[str, Any], role: str) -> bool:
@@ -46,9 +56,10 @@ def save(
     metric_id: str,
     factory_id: int | None,
     payload: dict[str, Any],
+    domain: str | None = None,
 ) -> str:
     result_id = str(uuid4())
-    domain = (
+    domain = domain or (
         "sales"
         if metric_id in {"revenue", "sales_growth"}
         else "quality" if metric_id == "defect_rate" else "production"
@@ -216,3 +227,21 @@ def latest_in_conversation(
             .first()
         )
     return dict(row) if row and permitted(dict(row), role) else None
+
+
+def audit(
+    engine: Engine, user_id: int, request_id: str, outcome: str, metric_id: str | None
+) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text("""
+            INSERT INTO access_audit(user_id,request_id,outcome,metric_id)
+            VALUES (:user_id,:request_id,:outcome,:metric_id)
+        """),
+            {
+                "user_id": user_id,
+                "request_id": request_id,
+                "outcome": outcome,
+                "metric_id": metric_id,
+            },
+        )

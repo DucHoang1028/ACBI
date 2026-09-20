@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.api.auth import current_user
-from app.chat.service import get_context
+from app.conversation.service import get_context
 from app.history.service import (
     build_transcript,
     conversation_results,

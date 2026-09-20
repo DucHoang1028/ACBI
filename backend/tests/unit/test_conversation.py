@@ -2,10 +2,11 @@ from datetime import date
 
 import pytest
 from app.ai.client import Intent
-from app.api.chat import merged_intent, special_kind
+from app.conversation.intent import merged_intent
 from app.core.dates import date_hints, resolve_period
 from app.presentation.summary import factual
 from app.query.builder import build
+from app.query.shortcuts import special_kind
 from app.query.validation import validate
 
 
@@ -136,7 +137,7 @@ def test_common_business_wording_and_data_overview_do_not_need_exact_metric_ids(
 
 
 def test_shortcut_answers_are_role_gated() -> None:
-    from app.api.chat import SPECIAL_ROLES
+    from app.query.shortcuts import SPECIAL_ROLES
 
     assert "production" not in SPECIAL_ROLES["coverage"]
     assert "sales" not in SPECIAL_ROLES["factories"]
@@ -167,8 +168,10 @@ def test_multi_metric_and_month_pair_questions() -> None:
 def test_listing_reshaping_and_share_questions() -> None:
     from datetime import date
 
-    from app.api.chat import reshape_kind, reshaped, share_text, special_kind
     from app.core.dates import intent_hints
+    from app.presentation.summary import share_text
+    from app.presentation.visualization import reshape_kind, reshaped
+    from app.query.shortcuts import special_kind
 
     assert special_kind("Cho tôi tất cả khu vực hiện tại đang có trong dữ liệu") == (
         "territories"
@@ -199,8 +202,8 @@ def test_listing_reshaping_and_share_questions() -> None:
 
 
 def test_all_chart_types_are_recognised_and_mapped() -> None:
-    from app.api.chat import auto_viz, requested_chart
     from app.core.dates import intent_hints
+    from app.presentation.visualization import auto_viz, requested_chart
 
     asks = {
         "Doanh thu theo danh mục dạng biểu đồ tròn": "pie",
@@ -231,7 +234,7 @@ def test_all_chart_types_are_recognised_and_mapped() -> None:
 
 
 def test_local_intent_only_for_unambiguous_questions() -> None:
-    from app.api.chat import local_intent
+    from app.conversation.intent import local_intent
 
     ok = local_intent("Doanh thu theo danh mục sản phẩm năm 2024 dạng biểu đồ tròn")
     assert ok and (ok.metric_id, ok.dimension) == ("revenue", "product_category")
@@ -248,7 +251,7 @@ def test_local_intent_only_for_unambiguous_questions() -> None:
 
 
 def test_small_talk_does_not_replay_and_month_with_trailing_words() -> None:
-    from app.api.chat import merged_intent
+    from app.conversation.intent import merged_intent
 
     prior = {
         "slots": {"metric_id": "production_output", "period": "explicit"},
@@ -292,3 +295,41 @@ def test_transcript_keeps_every_turn_in_order() -> None:
     assert transcript[2]["answer"]["status"] == "needs_clarification"
     assert transcript[0]["answer"]["result_id"] == "r1"
     assert build_transcript([], []) == []
+
+
+def test_unknown_factory_and_territory_are_asked_about() -> None:
+    from app.conversation.intent import clarification_text, merged_intent
+
+    factory_d = merged_intent(
+        intent(
+            metric_id="defect_rate", period="last_quarter", needs_clarification=False
+        ),
+        None,
+        "Tỷ lệ phế phẩm của Factory D quý trước",
+    )
+    assert factory_d.needs_clarification and factory_d.missing_fields == ["factory_id"]
+    assert "Factory A, B và C" in clarification_text(factory_d, "vi")
+
+    named = merged_intent(
+        intent(territory="Đức và Pháp", needs_clarification=False, period="last_year"),
+        None,
+        "Doanh thu của Đức và Pháp năm ngoái",
+    )
+    assert named.territory == "France|Germany"
+    asia = merged_intent(
+        intent(territory="Asia", needs_clarification=False, period="last_year"),
+        None,
+        "Doanh thu Asia năm ngoái",
+    )
+    assert asia.missing_fields == ["territory"]
+
+
+def test_unresolved_turn_keeps_earlier_slots() -> None:
+    from app.query.orchestrator import carry_slots
+
+    prior = {"slots": {"metric_id": "revenue", "period": "last_month"}}
+    blank = intent(metric_id=None, period=None, factory_id=4)
+    kept = carry_slots(prior, blank)
+    assert kept["metric_id"] == "revenue" and kept["period"] == "last_month"
+    assert "factory_id" not in kept  # an invalid factory never becomes a slot
+    assert carry_slots(prior, intent(period="last_quarter"))["period"] == "last_quarter"

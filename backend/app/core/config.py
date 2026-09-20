@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     llm_provider: str = "groq"
     llm_model: str = "openai/gpt-oss-120b"
     groq_api_key: SecretStr = SecretStr("")
+    # Extra keys, comma-separated. Used in order; an error moves to the next key.
+    groq_api_keys: SecretStr = SecretStr("")
     stt_model: str = "whisper-large-v3-turbo"
     llm_requests_per_minute: int = Field(default=15, ge=1)
     llm_tokens_per_minute: int = Field(default=8000, ge=1)
@@ -30,6 +32,9 @@ class Settings(BaseSettings):
     llm_max_regenerations: int = Field(default=2, ge=0, le=2)
     request_timeout_seconds: int = Field(default=30, ge=1, le=120)
     send_results_to_llm: bool = False
+    # Build a Structured Intent locally when the wording is unambiguous, sparing a
+    # model call. Turn off to send every question to the LLM.
+    local_intent_enabled: bool = True
     external_results_enabled: bool = False
     external_metadata_enabled: bool = False
 
@@ -44,6 +49,12 @@ class Settings(BaseSettings):
         if value != "acbi_ro":
             raise ValueError("Warehouse connections must use acbi_ro")
         return value
+
+    def groq_keys(self) -> list[str]:
+        """Every configured Groq key, primary first, without duplicates."""
+        extra = self.groq_api_keys.get_secret_value().split(",")
+        keys = [self.groq_api_key.get_secret_value(), *extra]
+        return list(dict.fromkeys(k.strip() for k in keys if k.strip()))
 
     def warehouse_url(self) -> URL:
         return URL.create(

@@ -2,7 +2,20 @@
 
 One FastAPI backend contains the API, core, auth, conversation, AI, metadata, query, presentation, history and admin modules. React/TypeScript/Vite is served by Nginx. PostgreSQL stores application data on an internal network. AdventureWorks and Groq are external dependencies. The AI proposes; the backend validates and owns execution.
 
-The proposal's eight backend responsibilities are retained: Query Orchestration, Authentication and Authorization, Conversation Management, AI Integration, Business Metadata and Retrieval, Query Processing, Result Presentation, History and Audit. Orchestration will live in `conversation` and `query`; no separate service or autonomous agent is introduced.
+The proposal's eight backend responsibilities are retained: Query Orchestration, Authentication and Authorization, Conversation Management, AI Integration, Business Metadata and Retrieval, Query Processing, Result Presentation, History and Audit. Where each responsibility lives in `backend/app`:
+
+| Proposal module | Code |
+| --- | --- |
+| Query Orchestration | `query/orchestrator.py` (the eleven-step pipeline, `answer`); `api/chat.py` is only the HTTP wrapper |
+| Authentication and Authorization | `auth/`, `api/auth.py`; `query/builder.authorize` for metric, factory and territory scope |
+| Conversation Management | `conversation/service.py` (slots, turns, pending clarification), `conversation/intent.py` (merge context, validate factory and territory choices) |
+| AI Integration | `ai/client.py` (`LLMClient`, `GroqClient`, `FakeLLM`), `ai/keys.py` (key pool and failover), `ai/budget.py` (`RequestBudget`), `ai/stt.py` |
+| Business Metadata and Retrieval | `metadata/` (dictionary, scoped BM25 retriever) |
+| Query Processing | `query/builder.py` (approved templates), `query/validation.py` (shared sqlglot gate), `query/shortcuts.py` (fixed listings, same gate) |
+| Result Presentation | `presentation/charts.py` (config validation), `presentation/visualization.py` (AI proposal loop, named chart types), `presentation/summary.py`, `presentation/contract.py` (response contract) |
+| History and Audit | `history/service.py` (saved results, transcript, `access_audit`), `api/history.py` |
+
+No separate service or autonomous agent is introduced.
 
 Phase 0 established warehouse connectivity, historical date resolution, metadata preparation and trusted reference evaluation. Phase 1 added authenticated local accounts and role-filtered metadata. Phase 2 added structured intent, static allowlisted SQL templates, bound parameters, date-aware reporting and per-user factory scope enforcement. Phase 3 added scoped BM25 retrieval, generated SQL proposals for approved question shapes, shared SQL validation, and checked visualization mappings. Phase 4 adds traceable saved answers, current-role checks on history, editable speech transcription, local user management, factual summaries, and controlled storage-failure responses. There is no public SQL execution endpoint. The model's SQL remains a proposal until the backend validates it. Live metadata export is enabled after owner approval; result-row export remains disabled.
 

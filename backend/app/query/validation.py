@@ -389,19 +389,12 @@ def verify_metric_formula(
             raise SQLPolicyError("Trend cannot remove date buckets")
 
 
-def validate(
-    plan: QueryPlan,
-    intent: Intent,
-    role: str,
-    *,
-    generated: bool = False,
-    trusted_template: bool = False,
-) -> ValidatedQuery:
-    factory = authorize(intent, role)
-    if len(plan.sql) > 24000:
+def parse_select(sql: str, role: str) -> tuple[exp.Select, list[exp.Table]]:
+    """Shared structural checks: one SELECT, permitted operations, tables, types."""
+    if len(sql) > 24000:
         raise SQLPolicyError("SQL exceeds the supported size")
     try:
-        statements = sqlglot.parse(plan.sql, read="postgres")
+        statements = sqlglot.parse(sql, read="postgres")
     except ParseError as error:
         raise SQLCorrectionError("SQL syntax is invalid") from error
     if len(statements) != 1 or not isinstance(statements[0], exp.Select):
@@ -456,6 +449,19 @@ def validate(
                 if source.args.get("pivots") or source.args.get("sample"):
                     raise SQLPolicyError("Table operation is not permitted")
                 physical.append(source)
+    return tree, physical
+
+
+def validate(
+    plan: QueryPlan,
+    intent: Intent,
+    role: str,
+    *,
+    generated: bool = False,
+    trusted_template: bool = False,
+) -> ValidatedQuery:
+    factory = authorize(intent, role)
+    tree, physical = parse_select(plan.sql, role)
     required = (
         "sales.salesorderheader"
         if plan.metric_id in {"revenue", "sales_growth"}
@@ -468,7 +474,7 @@ def validate(
         if placeholder.name not in params or placeholder.name.startswith("_"):
             raise SQLPolicyError("Unknown query parameter")
     schema: dict[str, Any] = {}
-    for name, columns in permitted.items():
+    for name, columns in allowed_tables(role).items():
         namespace, table = name.split(".")
         schema.setdefault(namespace, {})[table] = columns
     try:

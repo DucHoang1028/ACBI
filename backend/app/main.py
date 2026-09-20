@@ -19,7 +19,7 @@ from app.api.chat import router as chat_router
 from app.api.history import router as history_router
 from app.api.voice import router as voice_router
 from app.auth.service import migrate
-from app.chat.service import migrate as migrate_chat
+from app.conversation.service import migrate as migrate_chat
 from app.core.config import Settings
 from app.core.warehouse import inspect_anchor, warehouse_engine
 from app.history.service import migrate as migrate_history
@@ -65,12 +65,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )["examples"]
         app.state.retriever = BM25Retriever(dictionary, examples)
         app.state.warehouse = warehouse
-        app.state.llm = (
-            GroqClient(settings) if settings.groq_api_key.get_secret_value() else None
-        )
-        app.state.stt = (
-            GroqSTT(settings) if settings.groq_api_key.get_secret_value() else None
-        )
+        app.state.llm = GroqClient(settings) if settings.groq_keys() else None
+        app.state.stt = GroqSTT(settings) if settings.groq_keys() else None
         app.state.dictionary = dictionary
         app.state.readiness = {
             "phase": 4,
