@@ -1,4 +1,4 @@
-﻿"""Adversarial SQL and scope checks that must never reach the database."""
+"""Adversarial SQL and scope checks that must never reach the database."""
 
 from dataclasses import replace
 from datetime import date
@@ -7,7 +7,12 @@ import pytest
 from app.ai.client import Intent
 from app.history.service import permitted
 from app.query.builder import build, prepare
-from app.query.validation import SQLPolicyError, parse_select, validate
+from app.query.validation import (
+    SQLPolicyError,
+    SQLScopeError,
+    parse_select,
+    validate,
+)
 
 ANCHOR = date(2025, 6, 29)
 REVENUE = "SELECT SUM(subtotal) AS revenue FROM sales.salesorderheader"
@@ -132,3 +137,25 @@ def test_saved_results_reopen_only_within_current_scope(row: dict) -> None:
     if row == {"factory_id": None, "domain": "sales"}:
         assert permitted(row, "production") is False
     assert permitted(row, "manager") is True
+
+
+def test_grouped_trend_may_keep_the_harmless_row_guard_only() -> None:
+    user_intent = intent(dimension="week")
+    base = prepare(user_intent, "manager", ANCHOR)
+    head = (
+        "SELECT date_trunc('week', h.orderdate)::date AS week, "
+        "SUM(h.subtotal) AS revenue, COUNT(*) AS sample_count "
+        "FROM sales.salesorderheader h "
+        "WHERE h.orderdate >= :start AND h.orderdate < :end GROUP BY 1 "
+    )
+    guarded = replace(base, sql=head + "HAVING COUNT(*) > 0 ORDER BY 1")
+    assert validate(guarded, user_intent, "manager", generated=True).sql
+    hiding = replace(base, sql=head + "HAVING SUM(h.subtotal) > 1000000 ORDER BY 1")
+    with pytest.raises(SQLPolicyError) as failure:
+        validate(hiding, user_intent, "manager", generated=True)
+    assert not isinstance(failure.value, SQLScopeError)  # a rule breach, not access
+
+
+def test_scope_breaches_are_marked_as_access_failures() -> None:
+    with pytest.raises(SQLScopeError):
+        parse_select("SELECT 1 FROM person.person", "manager")

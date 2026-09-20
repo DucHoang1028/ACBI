@@ -38,6 +38,7 @@ from app.query.shortcuts import (
 from app.query.validation import (
     SQLCorrectionError,
     SQLPolicyError,
+    SQLScopeError,
     ValidatedQuery,
     validate,
 )
@@ -383,7 +384,31 @@ def answer(
             plan, query_path, references = route_query(
                 body.question, intent, user["role"], anchor, state, budget
             )
-        except PermissionError:
+        except PermissionError as error:
+            if isinstance(error, SQLPolicyError) and not isinstance(
+                error, SQLScopeError
+            ):
+                # A proposal that breaks a business rule is not an access failure.
+                logger.warning(
+                    "Request %s SQL proposal rejected: %s", request_id, error
+                )
+                outcome = "needs_clarification"
+                question = (
+                    "Tôi chưa tạo được truy vấn đã được kiểm chứng cho yêu cầu này. "
+                    "Hãy thử hỏi theo tháng, quý hoặc năm, hoặc diễn đạt lại."
+                    if body.language == "vi"
+                    else "I could not build a verified query for this request. Try "
+                    "asking by month, quarter or year, or rephrase it."
+                )
+                save_context(
+                    storage,
+                    conversation_id,
+                    user["id"],
+                    carry_slots(prior, intent),
+                    question,
+                    next_turns(prior, body.question, question),
+                )
+                return 200, response(outcome, question, request_id, conversation_id)
             outcome = "denied"
             return 403, response(
                 outcome,

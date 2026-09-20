@@ -74,7 +74,10 @@ TERRITORIES = {
     "France": "france|phap",
     "Germany": "germany|duc",
     "Australia": "australia|uc",
-    "United Kingdom": "united kingdom|vuong quoc anh|nuoc anh|anh",
+    # Bare "anh" (a common word) counts only when it clearly lists a country.
+    "United Kingdom": (
+        "united kingdom|vuong quoc anh|nuoc anh|uk|(?<=va )anh|(?<=, )anh|anh(?= va )"
+    ),
 }
 SHARE = r"phan tram|chiem bao nhieu|ty trong|share|percent"
 
@@ -110,7 +113,8 @@ METRIC_WORDS = (
 
 def territory_names(value: str) -> list[str] | None:
     """Canonical territory names found in free text; None when some word is unknown."""
-    folded = fold(value)
+    # In a model-supplied territory field a lone "Anh" means the United Kingdom.
+    folded = re.sub(r"\banh\b", "united kingdom", fold(value))
     names = [
         name
         for name, pattern in TERRITORIES.items()
@@ -208,10 +212,11 @@ def intent_hints(question: str) -> dict[str, object]:
         for name, pattern in TERRITORIES.items()
         if re.search(rf"\b(?:{pattern})\b", value)
     ]
-    if territories and re.search(rf"\b(?:so sanh|compare|{SHARE})\b", value):
-        if len(territories) >= 2 or re.search(rf"\b(?:{SHARE})\b", value):
-            hints["dimension"] = "sales_territory"
-            hints["territory"] = "|".join(territories)
+    if territories:
+        hints["territory"] = "|".join(territories)
+        asks_comparison = re.search(rf"\b(?:so sanh|compare|{SHARE})\b", value)
+        if "dimension" not in hints and (len(territories) >= 2 or asks_comparison):
+            hints["dimension"] = "sales_territory"  # one row per named territory
     return hints
 
 

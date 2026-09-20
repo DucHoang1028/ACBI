@@ -298,7 +298,7 @@ class GroqClient:
             "Use :territory or :factory_id only for filters in the intent. "
             "Never invent dates or filters. "
             "The backend enforces source scope independently. "
-            "Preserve empty-result semantics: aggregate queries need HAVING COUNT(*)>0; "
+            "Preserve empty-result semantics: aggregate queries without GROUP BY need HAVING COUNT(*)>0; grouped queries need no HAVING; "
             "growth needs counts in both periods. Return the metric ID as its column alias. "
             "Return missing_information and sql=null if approved metadata cannot answer. "
             "SQL is a proposal, not a claim that it has run. Default LIMIT 100."

@@ -93,6 +93,10 @@ class SQLPolicyError(PermissionError):
     """Policy violations are never retried or routed through another path."""
 
 
+class SQLScopeError(SQLPolicyError):
+    """The statement reaches beyond the user's authorized tables or columns."""
+
+
 class SQLCorrectionError(ValueError):
     """A syntax error may be corrected under the original request budget."""
 
@@ -385,7 +389,11 @@ def verify_metric_formula(
             or expression_key(grouping.expressions[0]) != expression_key(dimension.this)
         ):
             raise SQLPolicyError("Trend must group by its date bucket")
-        if tree.args.get("having"):
+        having = tree.args.get("having")
+        guard = sqlglot.parse_one("SELECT 1 HAVING COUNT(*)>0", read="postgres")
+        assert isinstance(guard, exp.Select)
+        # HAVING COUNT(*)>0 is harmless on grouped rows; other filters drop buckets.
+        if having and expression_key(having) != expression_key(guard.args["having"]):
             raise SQLPolicyError("Trend cannot remove date buckets")
 
 
@@ -445,7 +453,7 @@ def parse_select(sql: str, role: str) -> tuple[exp.Select, list[exp.Table]]:
             if isinstance(source, exp.Table):
                 name = f"{source.db}.{source.name}"
                 if source.catalog or name not in permitted:
-                    raise SQLPolicyError("Table is outside the reporting scope")
+                    raise SQLScopeError("Table is outside the reporting scope")
                 if source.args.get("pivots") or source.args.get("sample"):
                     raise SQLPolicyError("Table operation is not permitted")
                 physical.append(source)
@@ -482,7 +490,7 @@ def validate(
             tree, dialect="postgres", schema=schema, validate_qualify_columns=True
         )
     except OptimizeError as error:
-        raise SQLPolicyError("Column is outside the reporting scope") from error
+        raise SQLScopeError("Column is outside the reporting scope") from error
     if generated:
         verify_metric_formula(tree, intent, {f"{t.db}.{t.name}" for t in physical})
     if trusted_template:
@@ -501,7 +509,7 @@ def validate(
         else:
             expected_sql = production_sql(intent, expected_params, factory)
         if generated or plan.sql != expected_sql or params != expected_params:
-            raise SQLPolicyError("Template scope does not match the authorized user")
+            raise SQLScopeError("Template scope does not match the authorized user")
     else:
         # Generated SQL gets source-level predicates before user expressions.
         params["_scope_start"] = params.get("baseline_start", plan.start)

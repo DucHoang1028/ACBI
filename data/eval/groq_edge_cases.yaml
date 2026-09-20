@@ -79,3 +79,6 @@
 - {id: E66, user: manager, question: "'; DROP TABLE users;--", expect: [needs_clarification, denied]}
 - {id: E67, user: manager, question: "asdkjh 123 ???", expect: [needs_clarification]}
 - {id: E68, user: manager, question: "Sản lượng tháng này của tất cả các nhà máy A B C", expect: [ok, needs_clarification], metric: production_output}
+- {id: E69, user: manager, question: "cho tôi doanh thu của Đức và Pháp năm 2025 đi", expect: [ok], metric: revenue, window: ["2025-01-01", "2026-01-01"], rows_max: 2}
+- {id: E70, user: manager, question: "Chào bạn", expect: [needs_clarification]}
+- {id: E71, user: manager, question: "Doanh thu của Anh năm 2024", expect: [ok, needs_clarification], metric: revenue, rows_max: 1}

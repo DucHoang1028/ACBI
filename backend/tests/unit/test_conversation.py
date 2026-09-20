@@ -242,7 +242,6 @@ def test_local_intent_only_for_unambiguous_questions() -> None:
     assert factory and factory.factory_id == 1
     for text in (
         "Top 5 sản phẩm bán chạy năm 2024",
-        "Doanh thu của Canada quý trước",
         "Weekly revenue last month",
         "Doanh thu theo phân khúc khách hàng năm 2024",
         "Có vấn đề gì không?",
@@ -333,3 +332,20 @@ def test_unresolved_turn_keeps_earlier_slots() -> None:
     assert kept["metric_id"] == "revenue" and kept["period"] == "last_month"
     assert "factory_id" not in kept  # an invalid factory never becomes a slot
     assert carry_slots(prior, intent(period="last_quarter"))["period"] == "last_quarter"
+
+
+def test_named_countries_filter_the_answer() -> None:
+    from app.conversation.intent import local_intent
+    from app.core.dates import intent_hints
+
+    both = local_intent("cho tôi doanh thu của Đức và Pháp năm 2025 đi")
+    assert both and both.territory == "France|Germany"
+    assert both.dimension == "sales_territory"
+    one = local_intent("Doanh thu năm 2024 của Canada")
+    assert one and one.territory == "Canada" and one.dimension == "none"
+    # "Anh" alone is ambiguous (the UK, or a form of address): the model decides.
+    assert local_intent("Doanh thu của Anh năm 2024") is None
+    assert "territory" not in intent_hints("anh ơi cho em xem doanh thu tháng này")
+    assert intent_hints("Doanh thu của Đức và Anh năm 2023")["territory"] == (
+        "Germany|United Kingdom"
+    )

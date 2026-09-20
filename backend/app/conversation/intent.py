@@ -137,8 +137,11 @@ def local_intent(question: str) -> Intent | None:
         dimension == "none" and re.search(r"\b(?:nha may|factory)\b", value)
     ):
         return None
-    if not hints.get("territory") and any(
-        re.search(rf"\b(?:{pattern})\b", value) for pattern in TERRITORIES.values()
+    if not hints.get("territory") and (
+        re.search(r"\banh\b", value)  # "Anh": the country, or just a form of address
+        or any(
+            re.search(rf"\b(?:{pattern})\b", value) for pattern in TERRITORIES.values()
+        )
     ):
         return None
     return Intent.model_validate(
