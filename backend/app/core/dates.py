@@ -72,19 +72,17 @@ def intent_hints(question: str) -> dict[str, object]:
         r"\b(?:tang truong|growth|(?:tang|giam) bao nhieu"
         r"|so voi (?:thang|quy|ky) (?:lien )?truoc)\b"
     )
-    if re.search(growth, value) and re.search(
-        r"\b(?:doanh thu|revenue|sales)\b", value
-    ):
-        hints["metric_id"] = "sales_growth"
-    elif re.search(r"\b(?:doanh thu|doanh so|revenue|sales)\b", value) and (
-        not re.search(r"\b(?:loi nhuan|profit)\b", value)
-    ):
-        hints["metric_id"] = "revenue"
-    elif re.search(r"\b(?:san luong|san xuat|production output)\b", value):
-        hints["metric_id"] = "production_output"
-    elif re.search(r"\b(?:ty le loi|ty le phe pham|phe pham|scrap|defect)\b", value):
-        hints["metric_id"] = "defect_rate"
-    if re.search(r"\b(?:so sanh|compare|chart)\b", value):
+    found: list[str] = []
+    if re.search(r"\b(?:doanh thu|doanh so|revenue|sales)\b", value):
+        found.append("sales_growth" if re.search(growth, value) else "revenue")
+    if re.search(r"\b(?:san luong|san xuat|production output)\b", value):
+        found.append("production_output")
+    if re.search(r"\b(?:ty le loi|ty le phe pham|phe pham|scrap|defect)\b", value):
+        found.append("defect_rate")
+    # Profit has no approved definition; several metrics need a clarification.
+    if len(found) == 1 and not re.search(r"\b(?:loi nhuan|profit)\b", value):
+        hints["metric_id"] = found[0]
+    if re.search(r"\b(?:so sanh|compare|chart|so voi)\b", value):
         months = list(
             re.finditer(r"\bthang\s*(\d{1,2})(?:\s*(?:nam\s*|/)(\d{4}))?", value)
         )

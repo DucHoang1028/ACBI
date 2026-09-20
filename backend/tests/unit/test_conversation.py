@@ -152,3 +152,13 @@ def test_growth_wording_maps_to_sales_growth() -> None:
     ):
         assert intent_hints(text)["metric_id"] == "sales_growth"
     assert intent_hints("Doanh thu tháng trước")["metric_id"] == "revenue"
+
+
+def test_multi_metric_and_month_pair_questions() -> None:
+    from app.core.dates import intent_hints
+
+    assert "metric_id" not in intent_hints("Tổng doanh thu và tỷ lệ phế phẩm")
+    assert "metric_id" not in intent_hints("Doanh thu và lợi nhuận tháng này")
+    pair = intent_hints("Doanh thu tháng 5 so với tháng 4 năm 2025")
+    assert (pair["start_date"], pair["end_date"]) == ("2025-04-01", "2025-06-01")
+    assert pair["dimension"] == "month"
