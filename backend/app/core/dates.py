@@ -31,10 +31,10 @@ def date_hints(question: str) -> dict[str, str | None]:
     if month or quarter:
         match = month or quarter
         assert match is not None
-        number, year = map(int, match.groups())
+        number, match_year = map(int, match.groups())
         if month and not 1 <= number <= 12:
             return {}
-        start = date(year, number if month else (number - 1) * 3 + 1, 1)
+        start = date(match_year, number if month else (number - 1) * 3 + 1, 1)
         return {
             "period": "explicit",
             "start_date": start.isoformat(),
@@ -49,9 +49,9 @@ def date_hints(question: str) -> dict[str, str | None]:
             "start_date": start.isoformat(),
             "end_date": (end + timedelta(days=1)).isoformat(),
         }
-    year = re.search(r"\b(?:ca nam|tu dau den cuoi nam|nam)\s*(\d{4})\b", value)
-    if year:
-        start = date(int(year.group(1)), 1, 1)
+    named_year = re.search(r"\b(?:ca nam|tu dau den cuoi nam|nam)\s*(\d{4})\b", value)
+    if named_year:
+        start = date(int(named_year.group(1)), 1, 1)
         return {
             "period": "explicit",
             "start_date": start.isoformat(),
@@ -67,11 +67,19 @@ def intent_hints(question: str) -> dict[str, object]:
         for c in unicodedata.normalize("NFD", question.lower())
         if unicodedata.category(c) != "Mn"
     )
-    hints: dict[str, object] = date_hints(question)
-    if re.search(r"\b(?:doanh thu|revenue)\b", value) and not re.search(
-        r"\b(?:loi nhuan|profit)\b", value
+    hints: dict[str, object] = {**date_hints(question)}
+    if re.search(r"\b(?:tang truong|growth)\b", value) and re.search(
+        r"\b(?:doanh thu|revenue|sales)\b", value
+    ):
+        hints["metric_id"] = "sales_growth"
+    elif re.search(r"\b(?:doanh thu|doanh so|revenue|sales)\b", value) and (
+        not re.search(r"\b(?:loi nhuan|profit)\b", value)
     ):
         hints["metric_id"] = "revenue"
+    elif re.search(r"\b(?:san luong|san xuat|production output)\b", value):
+        hints["metric_id"] = "production_output"
+    elif re.search(r"\b(?:ty le loi|ty le phe pham|phe pham|scrap|defect)\b", value):
+        hints["metric_id"] = "defect_rate"
     if re.search(r"\b(?:so sanh|compare|chart)\b", value):
         months = list(
             re.finditer(r"\bthang\s*(\d{1,2})(?:\s*(?:nam\s*|/)(\d{4}))?", value)
@@ -80,9 +88,10 @@ def intent_hints(question: str) -> dict[str, object]:
         if len(months) == 2 and years:
             year = years[-1]
             numbers = [int(match.group(1)) for match in months]
-            if all(1 <= number <= 12 for number in numbers) and abs(
-                numbers[0] - numbers[1]
-            ) == 1:
+            if (
+                all(1 <= number <= 12 for number in numbers)
+                and abs(numbers[0] - numbers[1]) == 1
+            ):
                 start_month = min(numbers)
                 start = date(year, start_month, 1)
                 hints.update(
@@ -94,8 +103,16 @@ def intent_hints(question: str) -> dict[str, object]:
     territories = [
         name
         for name in (
-            "Canada", "Northwest", "Northeast", "Central", "Southwest", "Southeast",
-            "France", "Germany", "Australia", "United Kingdom",
+            "Canada",
+            "Northwest",
+            "Northeast",
+            "Central",
+            "Southwest",
+            "Southeast",
+            "France",
+            "Germany",
+            "Australia",
+            "United Kingdom",
         )
         if re.search(rf"\b{re.escape(name.lower())}\b", value)
     ]

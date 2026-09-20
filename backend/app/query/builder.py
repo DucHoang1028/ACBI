@@ -101,7 +101,12 @@ def prepare(intent: Intent, role: str, anchor: date) -> QueryPlan:
         if len(territory_names) == 1:
             params["territory"] = intent.territory
         else:
-            params.update({f"territory_{index}": name for index, name in enumerate(territory_names)})
+            params.update(
+                {
+                    f"territory_{index}": name
+                    for index, name in enumerate(territory_names)
+                }
+            )
     if intent.metric_id == "sales_growth":
         if intent.period not in {"last_month", "last_quarter"}:
             raise ValueError("Growth requires a complete previous month or quarter")
@@ -157,9 +162,14 @@ def sales_sql(intent: Intent, params: dict[str, Any], start: date) -> str:
         else ""
     )
     if intent.territory and "|" in intent.territory:
-        territory_where = " AND t.name IN (" + ",".join(
-            f":territory_{index}" for index, _ in enumerate(intent.territory.split("|"))
-        ) + ")"
+        territory_where = (
+            " AND t.name IN ("
+            + ",".join(
+                f":territory_{index}"
+                for index, _ in enumerate(intent.territory.split("|"))
+            )
+            + ")"
+        )
     else:
         territory_where = " AND t.name=:territory" if intent.territory else ""
     if metric == "sales_growth":

@@ -1,6 +1,8 @@
 """Authenticate, interpret, authorize, route, validate, execute and present."""
 
 import logging
+import re
+import unicodedata
 from dataclasses import replace
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -72,9 +74,14 @@ def merged_intent(
         current["needs_clarification"] = bool(unresolved)
         if not unresolved:
             current["clarification_question"] = None
-    if "metric_id" in hints and current.get("metric_id") and current.get("period") and (
-        current["period"] != "explicit"
-        or (current.get("start_date") and current.get("end_date"))
+    if (
+        "metric_id" in hints
+        and current.get("metric_id")
+        and current.get("period")
+        and (
+            current["period"] != "explicit"
+            or (current.get("start_date") and current.get("end_date"))
+        )
     ):
         current.update(
             needs_clarification=False,
@@ -90,6 +97,135 @@ def next_turns(
     turns = list((prior or {}).get("turns") or [])
     turns.append({"question": question, "answer": answer_text or ""})
     return turns[-6:]
+
+
+def normalized(question: str) -> str:
+    return "".join(
+        char
+        for char in unicodedata.normalize("NFD", question.lower())
+        if unicodedata.category(char) != "Mn"
+    ).replace("đ", "d")
+
+
+SPECIAL_ROLES = {
+    "factories": {"manager", "production"},
+    "coverage": {"manager", "sales"},
+    "factory_revenue": {"manager", "sales", "production"},
+}
+
+
+def special_kind(question: str) -> str | None:
+    value = normalized(question)
+    asks_factory = "nha may" in value or "factory" in value
+    if asks_factory and re.search(
+        r"\b(?:bao nhieu|nhung|ten|danh sach|how many|which)\b", value
+    ):
+        return "factories"
+    if re.search(r"\b(?:du lieu|data)\b", value) and re.search(
+        r"\b(?:nam|year|20\d\d)\b", value
+    ):
+        return "coverage"
+    if asks_factory and re.search(r"\b(?:doanh thu|doanh so|revenue|sales)\b", value):
+        return "factory_revenue"
+    return None
+
+
+def special_response(
+    kind: str,
+    engine: Any,
+    role: str,
+    language: str,
+    anchor: date,
+    anchor_source: str,
+    request_id: str,
+    conversation_id: str,
+) -> dict[str, Any]:
+    vi = language == "vi"
+    if kind == "factory_revenue":
+        message = (
+            "Doanh thu không thể phân theo nhà máy trong AdventureWorks vì đơn bán "
+            "hàng không liên kết với factory. Tôi có thể so sánh sản lượng hoặc tỷ lệ "
+            "phế phẩm của Factory A, B và C."
+            if vi
+            else "Revenue cannot be split by factory because sales orders are not "
+            "linked to factories. I can compare production output or defect rate "
+            "for Factory A, B and C."
+        )
+        result = response("needs_clarification", message, request_id, conversation_id)
+        result["llm_calls"] = 0
+        return result
+    sql = (
+        "SELECT name AS factory FROM acbi_demo.factory "
+        + ("WHERE factory_id = 1 " if role == "production" else "")
+        + "ORDER BY factory_id"
+        if kind == "factories"
+        else "SELECT EXTRACT(YEAR FROM orderdate)::int AS year,COUNT(*) AS orders "
+        "FROM sales.salesorderheader GROUP BY 1 ORDER BY 1"
+    )
+    with engine.connect() as connection, connection.begin():
+        connection.execute(text("SET TRANSACTION READ ONLY"))
+        connection.execute(
+            text("SELECT set_config('statement_timeout', '15000', true)")
+        )
+        rows = [dict(row) for row in connection.execute(text(sql)).mappings()]
+    if kind == "factories":
+        names = ", ".join(str(row["factory"]) for row in rows)
+        answer = (
+            f"Database có {len(rows)} nhà máy: {names}."
+            if vi
+            else f"The database has {len(rows)} factories: {names}."
+        )
+    else:
+        years = ", ".join(str(row["year"]) for row in rows)
+        answer = (
+            f"Dữ liệu đơn bán hàng có các năm: {years}."
+            if vi
+            else f"Sales-order data is available for: {years}."
+        )
+    result = response("ok", "Results found", request_id, conversation_id)
+    result.update(
+        answer_text=answer,
+        table=rows,
+        viz_config=TABLE.model_dump(),
+        chart_fallback=True,
+        sources={
+            "source": "Adventureworks",
+            "sql": sql,
+            "parameters": {},
+            "retrieved_at": datetime.now(timezone.utc).isoformat(),
+            "metric_versions": {},
+            "data_as_of": anchor.isoformat(),
+            "anchor_source": anchor_source,
+            "references": [],
+        },
+        llm_calls=0,
+    )
+    return result
+
+
+def clarification_text(intent: Intent, language: str) -> str:
+    vi = language == "vi"
+    if not intent.metric_id:
+        return (
+            "Tôi chưa có định nghĩa đã phê duyệt cho chỉ số này. Bạn có thể hỏi "
+            "doanh thu, tăng trưởng doanh thu, sản lượng hoặc tỷ lệ phế phẩm."
+            if vi
+            else "This metric has no approved definition yet. Ask about revenue, "
+            "revenue growth, production output, or defect rate."
+        )
+    if not intent.period or intent.period == "recently":
+        return (
+            "Bạn muốn xem kỳ nào? Ví dụ: tháng này, quý trước, năm 2024 "
+            "hoặc một khoảng ngày."
+            if vi
+            else "Which period should I use? For example: this month, "
+            "last quarter, 2024, or a date range."
+        )
+    return intent.clarification_question or (
+        "Cần thêm một chi tiết để trả lời câu hỏi này."
+        if vi
+        else "One more detail is needed to answer this question."
+    )
 
 
 def run_query(
@@ -245,6 +381,36 @@ def answer(
                 conversation_id,
             )
         anchor = date.fromisoformat(request.app.state.readiness["data_as_of"])
+        kind = special_kind(body.question)
+        if kind:
+            if user["role"] not in SPECIAL_ROLES[kind]:
+                outcome = "denied"
+                return 403, response(
+                    outcome,
+                    "Data is outside your access scope",
+                    request_id,
+                    conversation_id,
+                )
+            result = special_response(
+                kind,
+                request.app.state.warehouse,
+                user["role"],
+                body.language,
+                anchor,
+                request.app.state.readiness["anchor_source"],
+                request_id,
+                conversation_id,
+            )
+            save_context(
+                storage,
+                conversation_id,
+                user["id"],
+                (prior or {}).get("slots") or {},
+                result["message"] if kind == "factory_revenue" else None,
+                next_turns(prior, body.question, result["message"]),
+            )
+            outcome = result["status"]
+            return 200, result
         context = {
             "data_as_of": anchor.isoformat(),
             "slots": prior["slots"] if prior else {},
@@ -269,7 +435,11 @@ def answer(
                 outcome = "needs_clarification"
                 question = str(error)
                 save_context(
-                    storage, conversation_id, user["id"], intent.model_dump(), question,
+                    storage,
+                    conversation_id,
+                    user["id"],
+                    intent.model_dump(),
+                    question,
                     next_turns(prior, body.question, question),
                 )
                 return 200, response(outcome, question, request_id, conversation_id)
@@ -280,12 +450,13 @@ def answer(
             or intent.period == "recently"
         ):
             outcome = "needs_clarification"
-            question = (
-                intent.clarification_question
-                or "Which metric and reporting period do you mean?"
-            )
+            question = clarification_text(intent, body.language)
             save_context(
-                storage, conversation_id, user["id"], intent.model_dump(), question,
+                storage,
+                conversation_id,
+                user["id"],
+                intent.model_dump(),
+                question,
                 next_turns(prior, body.question, question),
             )
             return 200, response(outcome, question, request_id, conversation_id)
@@ -306,14 +477,22 @@ def answer(
             outcome = "needs_clarification"
             question = str(error)
             save_context(
-                storage, conversation_id, user["id"], intent.model_dump(), question,
+                storage,
+                conversation_id,
+                user["id"],
+                intent.model_dump(),
+                question,
                 next_turns(prior, body.question, question),
             )
             return 200, response(outcome, question, request_id, conversation_id)
         rows = run_query(request.app.state.warehouse, plan, budget)
         outcome = "ok" if rows else "no_data"
         save_context(
-            storage, conversation_id, user["id"], intent.model_dump(), None,
+            storage,
+            conversation_id,
+            user["id"],
+            intent.model_dump(),
+            None,
             next_turns(prior, body.question, None),
         )
         result = response(

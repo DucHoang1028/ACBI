@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 from app.ai.client import Intent
-from app.api.chat import merged_intent
+from app.api.chat import merged_intent, special_kind
 from app.core.dates import date_hints, resolve_period
 from app.presentation.summary import factual
 from app.query.builder import build
@@ -114,3 +114,30 @@ def test_year_and_two_territories_are_enough_information() -> None:
     assert validated.params["territory_0"] == "Canada"
     assert validated.params["territory_1"] == "Northwest"
     assert ":territory_0" in validated.sql and ":territory_1" in validated.sql
+
+
+def test_common_business_wording_and_data_overview_do_not_need_exact_metric_ids() -> (
+    None
+):
+    assert (
+        merged_intent(intent(metric_id=None), None, "Sản xuất tháng này").metric_id
+        == "production_output"
+    )
+    assert (
+        merged_intent(intent(metric_id=None), None, "Tỷ lệ lỗi quý trước").metric_id
+        == "defect_rate"
+    )
+    assert (
+        special_kind("Database có bao nhiêu nhà máy và những nhà máy nào?")
+        == "factories"
+    )
+    assert special_kind("Có dữ liệu năm 2024 không?") == "coverage"
+    assert special_kind("Doanh thu của từng nhà máy") == "factory_revenue"
+
+
+def test_shortcut_answers_are_role_gated() -> None:
+    from app.api.chat import SPECIAL_ROLES
+
+    assert "production" not in SPECIAL_ROLES["coverage"]
+    assert "sales" not in SPECIAL_ROLES["factories"]
+    assert "it_admin" not in {r for roles in SPECIAL_ROLES.values() for r in roles}
