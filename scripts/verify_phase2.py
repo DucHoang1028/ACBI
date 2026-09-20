@@ -19,9 +19,9 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app.ai.client import FakeLLM, Intent  # noqa: E402
 from app.conversation.intent import local_intent  # noqa: E402
-from app.query.shortcuts import special_kind  # noqa: E402
 from app.core.dates import month_start, resolve_period  # noqa: E402
 from app.main import app  # noqa: E402
+from app.query.shortcuts import special_kind  # noqa: E402
 
 
 def intent_for(item: dict[str, Any]) -> Intent:

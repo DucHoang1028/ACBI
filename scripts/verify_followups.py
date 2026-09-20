@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """Listing, share-of-total and redisplay questions against real data (FakeLLM)."""
 
 import sys
@@ -19,6 +20,8 @@ KPI = "Doanh thu năm 2023 dạng thẻ KPI"
 PIE = "Doanh thu theo danh mục sản phẩm năm 2023 dạng biểu đồ tròn"
 LINE = "Doanh thu theo tháng năm 2023 dạng biểu đồ đường"
 OUTPUT = "Sản lượng theo tháng và dây chuyền dạng cột chồng năm {year}"
+EFFICIENCY = "Hiệu suất các dây chuyền sản xuất hôm nay như thế nào?"
+STAFF = "Doanh thu theo nhân viên bán hàng năm 2024"
 SHARE = "Nếu tính riêng doanh thu Đức và Anh thì nó chiếm bao nhiêu phần trăm năm 2023"
 
 
@@ -56,6 +59,7 @@ def main() -> None:
                 ).scalar_one()
             )
         output = OUTPUT.format(year=year)
+        anchor_day = app.state.readiness["data_as_of"]
         app.state.llm = FakeLLM(
             {
                 SHARE: clarify,
@@ -64,10 +68,12 @@ def main() -> None:
                 output: variant(metric_id="production_output"),
                 PIE: variant(dimension="product_category"),
                 LINE: variant(dimension="month"),
+                EFFICIENCY: variant(metric_id="production_output", period="today"),
+                STAFF: variant(period="explicit", needs_clarification=False),
             }
         )
         tokens = {}
-        for user in ("manager", "production_a"):
+        for user in ("manager", "production_a", "sales"):
             login = client.post(
                 "/api/auth/login",
                 json={"username": user, "password": credentials[user]},
@@ -191,6 +197,103 @@ def main() -> None:
             f"/api/conversations/{conversation}", headers=tokens["production_a"]
         )
         assert foreign.status_code == 404, foreign.status_code
+
+        # Conversational answers are grounded in the rows and the dictionary.
+        two = ask("manager", "cho tôi doanh thu của Đức và Pháp năm 2025 đi")
+        assert two["status"] == "ok" and len(two["table"]) == 2, two
+        which = ask(
+            "manager", "giữa 2 cái thì cái nào nhiều hơn", two["conversation_id"]
+        )
+        assert which["status"] == "ok" and which["saved"], which
+        by_name = {r["territory"]: Decimal(str(r["revenue"])) for r in two["table"]}
+        winner = max(by_name, key=lambda k: by_name[k])
+        assert which["answer_text"].startswith(f"{winner} cao hơn"), which[
+            "answer_text"
+        ]
+        assert which["table"] == two["table"] and which["viz_config"]["type"] == "table"
+        meaning = ask(
+            "manager",
+            "germany trong dữ liệu bạn nói tiếng việt là gì",
+            two["conversation_id"],
+        )
+        assert "Germany là Đức" in meaning["answer_text"], meaning
+        hello = ask("manager", "Chào bạn", two["conversation_id"])
+        assert hello["status"] == "ok" and "Xin chào" in hello["answer_text"], hello
+
+        # Forecast: computed from recorded months, labelled, or refused with a reason.
+        forecast = ask(
+            "manager",
+            "Dựa trên doanh thu của đức và pháp thì bạn có dự đoán được trong năm 2026 "
+            "doanh thu sẽ phát triển theo hướng nào",
+        )
+        assert forecast["status"] in {"ok", "needs_clarification"}, forecast
+        if forecast["status"] == "ok":
+            info = forecast["sources"]["forecast"]
+            assert info["is_forecast"] and info["history_months"] >= 24, info
+            assert forecast["viz_config"]["type"] == "line"
+            assert any(r["forecast"] for r in forecast["table"]) and any(
+                r["actual"] for r in forecast["table"]
+            )
+            assert forecast["answer_text"].startswith(
+                "Dự báo, không phải số liệu"
+            ), forecast["answer_text"]
+            last = [r for r in forecast["table"] if r["actual"]][-1]
+            with app.state.warehouse.connect() as connection:
+                recorded = connection.execute(
+                    text(
+                        "SELECT SUM(h.subtotal) FROM sales.salesorderheader h "
+                        "JOIN sales.salesterritory t USING(territoryid) "
+                        "WHERE t.name IN ('France','Germany') "
+                        "AND date_trunc('month',h.orderdate)=CAST(:m AS date)"
+                    ),
+                    {"m": last["month"]},
+                ).scalar_one()
+            assert abs(Decimal(last["actual"]) - Decimal(str(recorded))) < Decimal(
+                "0.01"
+            )
+        else:
+            assert "không đưa ra dự báo" in forecast["message"], forecast
+        print(
+            "forecast ->",
+            forecast["status"],
+            (forecast.get("answer_text") or forecast["message"])[:230],
+        )
+        outside = ask("sales", "Dự báo sản lượng tháng tới")
+        assert outside["status"] == "denied" and outside["http"] == 403, outside
+        rate = ask("manager", "Dự báo tỷ lệ phế phẩm năm tới")
+        assert rate["status"] == "needs_clarification", rate
+        materials = ask(
+            "manager", "Vật tư nào có nguy cơ thiếu cho kế hoạch sản xuất tuần tới?"
+        )
+        assert materials["status"] == "needs_clarification"
+        assert "billofmaterials" in materials["message"], materials
+
+        # New approved metric, day/week periods, and questions that must ask first.
+        ontime = ask("manager", "Tỷ lệ hoàn thành đúng hạn năm 2024")
+        assert ontime["status"] == "ok", ontime
+        with app.state.warehouse.connect() as connection:
+            expected_ratio = connection.execute(
+                text(
+                    "SELECT COUNT(*) FILTER (WHERE enddate<=duedate)::numeric/COUNT(*) "
+                    "FROM production.workorder "
+                    "WHERE enddate>=DATE '2024-01-01' AND enddate<DATE '2025-01-01'"
+                )
+            ).scalar_one()
+        assert abs(
+            Decimal(str(ontime["table"][0]["on_time_rate"])) - expected_ratio
+        ) < (Decimal("0.000001"))
+        by_line = ask("manager", "Tỷ lệ hoàn thành đúng hạn theo dây chuyền năm 2024")
+        assert by_line["status"] == "ok" and by_line["table"], by_line
+        assert all(0 <= float(r["on_time_rate"]) <= 1 for r in by_line["table"])
+        today = ask("manager", "Sản lượng hôm nay")
+        assert today["status"] in {"ok", "no_data"}, today
+        assert today["sources"]["parameters"]["start"] == anchor_day, today["sources"]
+        efficiency = ask("manager", EFFICIENCY)
+        assert efficiency["status"] == "needs_clarification", efficiency
+        assert "đúng hạn" in efficiency["message"], efficiency
+        staff = ask("manager", STAFF)
+        assert staff["status"] == "needs_clarification", staff
+        assert "nhân viên bán hàng" in staff["message"], staff
         client.post("/api/auth/logout")
     print(
         "Follow-ups: territory list (scoped), Germany+UK share, stacked bar, KPI "

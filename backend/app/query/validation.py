@@ -35,6 +35,7 @@ TABLES: dict[str, dict[str, str]] = {
         "orderqty": "INT",
         "scrappedqty": "INT",
         "enddate": "TIMESTAMP",
+        "duedate": "TIMESTAMP",
         "scrapreasonid": "INT",
     },
     "production.workorderrouting": {
@@ -206,6 +207,7 @@ def verify_metric_formula(
         "revenue": {"sales.salesorderheader"},
         "production_output": {"production.workorder"},
         "defect_rate": {"production.workorder"},
+        "on_time_rate": {"production.workorder"},
     }
     if physical_names != supported_sources[str(metric)]:
         raise SQLPolicyError("The query uses tables outside this approved mapping")
@@ -220,6 +222,9 @@ def verify_metric_formula(
         "revenue": "SUM(subtotal)",
         "production_output": "SUM(orderqty-scrappedqty)",
         "defect_rate": "SUM(scrappedqty)::numeric/NULLIF(SUM(orderqty),0)",
+        "on_time_rate": (
+            "COUNT(*) FILTER (WHERE enddate<=duedate)::numeric/NULLIF(COUNT(*),0)"
+        ),
         "sales_growth": "(current_revenue-previous_revenue)/NULLIF(previous_revenue,0)",
     }[str(metric)]
     approved_expression = sqlglot.parse_one(

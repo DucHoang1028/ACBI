@@ -1,4 +1,4 @@
-﻿# Schema management
+# Schema management
 
 The application database is created and upgraded by idempotent `migrate()` functions
 (`auth`, `conversation`, `history`) that run at startup with `CREATE TABLE IF NOT EXISTS`

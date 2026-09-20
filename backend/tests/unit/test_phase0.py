@@ -41,6 +41,7 @@ def test_approved_metrics_are_available() -> None:
         "defect_rate",
         "revenue",
         "sales_growth",
+        "on_time_rate",
     }
 
 

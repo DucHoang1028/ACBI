@@ -22,7 +22,7 @@
 - {id: E18, user: manager, question: "Doanh thu", expect: [needs_clarification]}
 - {id: E19, user: manager, question: "Doanh thu gần đây", expect: [needs_clarification]}
 - {id: E20, user: manager, question: "Doanh thu và tỷ lệ phế phẩm tháng này", expect: [needs_clarification]}
-- {id: E21, user: manager, question: "hello", expect: [needs_clarification]}
+- {id: E21, user: manager, question: "hello", expect: [ok, needs_clarification]}
 - {id: E22, user: manager, question: "Doanh thu năm 2030", expect: [no_data]}
 - {id: E23, user: manager, question: "Doanh thu năm 2005", expect: [no_data]}
 - {id: E24, user: manager, question: "Tỷ lệ phế phẩm của Factory D quý trước", expect: [needs_clarification]}
@@ -45,7 +45,7 @@
 - {id: E41, user: production_a, question: "Tỷ lệ phế phẩm tháng trước", expect: [ok], metric: defect_rate, window: last_month}
 - {id: E42, user: manager, question: "Doanh thu năm 2024 của Canada", expect: [ok], metric: revenue, window: ["2024-01-01", "2025-01-01"]}
 - {id: E43, user: manager, question: "Doanh thu của Đức và Pháp năm 2024", expect: [ok, needs_clarification], metric: revenue}
-- {id: E44, user: manager, question: "Tổng doanh thu tuần trước", expect: [needs_clarification]}
+- {id: E44, user: manager, question: "Tổng doanh thu tuần trước", expect: [ok, no_data], metric: revenue, window: last_week}
 - {id: E45, user: manager, question: "Doanh thu 7 ngày qua", expect: [needs_clarification, ok]}
 - {id: E46, user: manager, question: "Show me production output this month by production line", expect: [ok], metric: production_output, window: this_month}
 - {id: E47, user: manager, question: "Sản lượng theo nhà máy năm 2024", expect: [ok], metric: production_output, window: ["2024-01-01", "2025-01-01"]}
@@ -58,7 +58,7 @@
 - {id: C4, user: manager, conversation: follow, question: "Hiển thị dạng bảng", expect: [ok], chart: table}
 - {id: D1, user: manager, conversation: clarify, question: "Doanh thu", expect: [needs_clarification]}
 - {id: D2, user: manager, conversation: clarify, question: "Tháng 6 năm 2025", expect: [ok], metric: revenue, window: ["2025-06-01", "2025-07-01"]}
-- {id: D3, user: manager, conversation: clarify, question: "hello", expect: [needs_clarification]}
+- {id: D3, user: manager, conversation: clarify, question: "hello", expect: [ok, needs_clarification]}
 - {id: D4, user: manager, conversation: clarify, question: "Còn quý trước?", expect: [ok], metric: revenue, window: last_quarter}
 - {id: F1, user: manager, question: "Sản lượng theo tháng và dây chuyền dạng cột chồng năm 2024", expect: [ok], metric: production_output, chart: stacked_bar}
 - {id: E51, user: manager, question: "Doanh thu theo tuần của tháng trước", expect: [ok, needs_clarification], metric: revenue, window: last_month}
@@ -80,5 +80,26 @@
 - {id: E67, user: manager, question: "asdkjh 123 ???", expect: [needs_clarification]}
 - {id: E68, user: manager, question: "Sản lượng tháng này của tất cả các nhà máy A B C", expect: [ok, needs_clarification], metric: production_output}
 - {id: E69, user: manager, question: "cho tôi doanh thu của Đức và Pháp năm 2025 đi", expect: [ok], metric: revenue, window: ["2025-01-01", "2026-01-01"], rows_max: 2}
-- {id: E70, user: manager, question: "Chào bạn", expect: [needs_clarification]}
+- {id: E70, user: manager, question: "Chào bạn", expect: [ok], says: "Xin chào"}
 - {id: E71, user: manager, question: "Doanh thu của Anh năm 2024", expect: [ok, needs_clarification], metric: revenue, rows_max: 1}
+- {id: E72, user: manager, question: "germany trong dữ liệu bạn nói tiếng việt là gì", expect: [ok], says: "Đức"}
+- {id: E73, user: manager, question: "Doanh thu được tính như thế nào?", expect: [ok], says: "subtotal"}
+- {id: E74, user: manager, question: "Bạn làm được những gì?", expect: [ok], says: "AdventureWorks"}
+- {id: T1, user: manager, conversation: talk, question: "cho tôi doanh thu của Đức và Pháp năm 2025 đi", expect: [ok], metric: revenue, rows_max: 2}
+- {id: T2, user: manager, conversation: talk, question: "giữa 2 cái thì cái nào nhiều hơn", expect: [ok], says: "cao hơn"}
+- {id: T3, user: manager, conversation: talk, question: "cộng lại thì tổng là bao nhiêu", expect: [ok], says: "Tổng"}
+- {id: T4, user: manager, conversation: talk, question: "mỗi nước chiếm bao nhiêu phần trăm", expect: [ok], says: "%"}
+- {id: E75, user: manager, question: "Dựa trên doanh thu của đức và pháp thì bạn có dự đoán được trong năm 2026 doanh thu sẽ phát triển theo hướng nào", expect: [needs_clarification]}
+- {id: E76, user: manager, question: "Vật tư nào có nguy cơ thiếu cho kế hoạch sản xuất tuần tới?", expect: [needs_clarification]}
+- {id: E77, user: manager, question: "Doanh thu quý sau sẽ ra sao", expect: [ok, needs_clarification]}
+- {id: E78, user: manager, question: "Forecast revenue for next year", expect: [ok, needs_clarification]}
+- {id: F2, user: manager, question: "Dự báo doanh thu 6 tháng tới", expect: [ok, needs_clarification], metric: revenue}
+- {id: F3, user: production_a, question: "Dự báo sản lượng quý tới", expect: [ok, needs_clarification]}
+- {id: F4, user: sales, question: "Dự báo sản lượng tháng tới", expect: [denied]}
+- {id: E79, user: manager, question: "Tỷ lệ hoàn thành đúng hạn theo dây chuyền năm 2024", expect: [ok], metric: on_time_rate, window: ["2024-01-01", "2025-01-01"]}
+- {id: E80, user: manager, question: "Hiệu suất các dây chuyền sản xuất hôm nay như thế nào?", expect: [needs_clarification]}
+- {id: E81, user: manager, question: "Sản lượng hôm nay là bao nhiêu?", expect: [ok, no_data], metric: production_output, window: today}
+- {id: E82, user: manager, question: "Doanh thu hôm qua", expect: [ok, no_data], metric: revenue, window: yesterday}
+- {id: E83, user: production_a, question: "Tỷ lệ hoàn thành đúng hạn của Factory A quý trước", expect: [ok], metric: on_time_rate, window: last_quarter}
+- {id: E84, user: sales, question: "Tỷ lệ hoàn thành đúng hạn quý trước", expect: [denied]}
+

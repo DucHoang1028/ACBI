@@ -37,10 +37,11 @@ def describe(rows: list[dict[str, Any]]) -> dict[str, Any]:
     for key in rows[0]:
         values = [row.get(key) for row in rows]
         numeric = [number(v) for v in values]
-        if all(n is not None for n in numeric):
+        present = [n for n, v in zip(numeric, values) if v is not None]
+        if present and all(n is not None for n in present):
             columns[key] = {
                 "kind": "numeric",
-                "nonnegative": all(n >= 0 for n in numeric if n is not None),
+                "nonnegative": all(n >= 0 for n in present if n is not None),
             }
         else:
             temporal = all(isinstance(v, str) and len(v) >= 10 for v in values)
@@ -79,6 +80,8 @@ def validate_viz(
     if len(selected) != len(set(selected)):
         raise ValueError("Mappings must use different columns")
     if not config.y or any(columns[c]["kind"] != "numeric" for c in config.y):
+        raise ValueError("The value columns must be numeric and non-null")
+    if config.type != "line" and any(not columns[c]["complete"] for c in config.y):
         raise ValueError("The value columns must be numeric and non-null")
     if config.type == "kpi_card":
         if len(rows) != 1 or len(config.y) != 1 or config.x or config.series:

@@ -262,8 +262,19 @@ def main() -> None:
                 json={"question": question},
                 headers={"Authorization": f"Bearer {tokens['manager']}"},
             )
-            assert denied.status_code == 403 and denied.json()["status"] == "denied"
+            # A formula change is an invalid proposal, not an access denial: the user
+            # is asked to rephrase, nothing runs, and the breach is audited.
+            assert denied.status_code == 200, denied.text
+            assert denied.json()["status"] == "needs_clarification"
             assert len(warehouse_statements) == before
+            with app.state.storage.connect() as connection:
+                logged = connection.execute(
+                    text(
+                        "SELECT count(*) FROM access_audit "
+                        "WHERE outcome='policy_violation'"
+                    )
+                ).scalar_one()
+            assert logged >= 1
         finally:
             event.remove(app.state.warehouse, "before_cursor_execute", record)
     report = {

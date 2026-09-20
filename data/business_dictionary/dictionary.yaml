@@ -55,6 +55,26 @@ businessMetrics:
     dataMappingIds:
     - production_fact
     emptySetPolicy: no_data; do not coalesce absence to zero
+- metricId: on_time_rate
+  name: On-time completion rate
+  domain: production
+  description: Share of work orders finished on or before their due date. Added 2026-09-21 at the owner's request to cover the proposal's line-performance example; the formula was proposed by the assistant and approved by the owner's delegation, so review it.
+  supportedDimensions:
+  - date
+  - product
+  - product_category
+  - production_line
+  - factory
+  definitions:
+  - version: 1
+    formula: COUNT(*) FILTER (WHERE enddate <= duedate)::numeric / NULLIF(COUNT(*),0)
+    unit: ratio
+    approvalStatus: approved
+    effectiveFrom: '2026-09-21'
+    dateColumn: production.workorder.enddate
+    dataMappingIds:
+    - production_fact
+    emptySetPolicy: no_data; do not coalesce absence to zero
 - metricId: revenue
   name: Revenue
   domain: sales
@@ -131,6 +151,7 @@ dataMappings:
   - orderqty
   - scrappedqty
   - enddate
+  - duedate
   - scrapreasonid
   joinRules:
   - One workorder row is one fact. stockedqty is absent in this port; derive orderqty-scrappedqty.

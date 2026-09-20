@@ -1,8 +1,10 @@
 """Query Orchestration: interpret, authorize, route, execute, present, persist."""
 
+import calendar
 import logging
+import re
 from dataclasses import replace
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -15,12 +17,27 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.ai.budget import RequestBudget
 from app.ai.client import FakeLLM, Intent
+from app.conversation.glossary import (
+    asks_forecast,
+    asks_materials,
+    converse,
+    no_materials,
+)
 from app.conversation.intent import clarification_text, local_intent, merged_intent
 from app.conversation.service import get_context, next_turns, save_context
-from app.core.dates import is_share_question
+from app.core.dates import (
+    METRIC_WORDS,
+    fold,
+    intent_hints,
+    is_share_question,
+    month_start,
+)
 from app.history.service import audit, latest_in_conversation
 from app.history.service import save as save_result
+from app.presentation.analysis import METRIC_NAMES, analysis_kind, analyze
+from app.presentation.charts import TABLE, VizConfig, validate_viz
 from app.presentation.contract import AskRequest, response
+from app.presentation.messages import Explained, friendly
 from app.presentation.summary import factual, numbers_match, share_text
 from app.presentation.visualization import (
     chart,
@@ -29,6 +46,13 @@ from app.presentation.visualization import (
     reshaped,
 )
 from app.query.builder import authorize, build, prepare, supports
+from app.query.forecast import (
+    METHOD_VERSION,
+    ForecastRefused,
+    contiguous,
+    make_forecast,
+    next_months,
+)
 from app.query.shortcuts import (
     SPECIAL_ROLES,
     special_domain,
@@ -136,7 +160,7 @@ def route_query(
     for attempt in range(state.settings.llm_max_regenerations + 1):
         candidate = state.llm.sql_candidate(question, intent, references, error, budget)
         if candidate.missing_information or not candidate.sql:
-            raise ValueError(
+            raise Explained(
                 candidate.missing_information or "More information is required"
             )
         try:
@@ -196,6 +220,242 @@ def persist(
         result["saved"] = False
 
 
+def forecast_horizon(question: str, first: date) -> tuple[int, bool]:
+    """(months to forecast, whether the request was cut to the 12-month limit)."""
+    value = fold(question)
+    year = re.search(r"\b(20\d\d)\b", value)
+    if year and int(year.group(1)) >= first.year:
+        wanted = (int(year.group(1)) - first.year) * 12 + (13 - first.month)
+    elif re.search(r"\b(?:nam toi|nam sau|next year)\b", value):
+        wanted = 12
+    elif re.search(r"\b(?:quy toi|quy sau|next quarter)\b", value):
+        wanted = 3
+    elif re.search(r"\b(?:thang toi|thang sau|next month)\b", value):
+        wanted = 1
+    else:
+        wanted = 6
+    return min(max(wanted, 1), 12), wanted > 12
+
+
+def run_forecast(
+    body: AskRequest,
+    user: dict[str, Any],
+    state: Any,
+    budget: RequestBudget,
+    anchor: date,
+    request_id: str,
+    conversation_id: str,
+    prior: dict[str, Any] | None,
+) -> tuple[int, dict[str, Any]]:
+    """Trend forecast of revenue or output from complete recorded months."""
+    storage, settings, vi = state.storage, state.settings, body.language == "vi"
+    hints = intent_hints(body.question)
+    metric = str(hints.get("metric_id") or "")
+    if metric not in {"revenue", "production_output"}:
+        text_out = (
+            "Tôi chỉ dự báo được doanh thu hoặc sản lượng (các tỷ lệ không cộng dồn "
+            "nên không dự báo theo cách này). Bạn muốn dự báo chỉ số nào?"
+            if vi
+            else "I can forecast revenue or production output only (ratios do not add "
+            "up, so this method does not apply). Which one do you want?"
+        )
+        return 200, response(
+            "needs_clarification", text_out, request_id, conversation_id
+        )
+    last_day = calendar.monthrange(anchor.year, anchor.month)[1]
+    end = (
+        anchor + timedelta(days=1) if anchor.day == last_day else anchor.replace(day=1)
+    )
+    start = month_start(end, -36)  # only complete months are history
+    letter = re.search(r"\b(?:nha may|factory)\s*([abc])\b", fold(body.question))
+    intent = Intent.model_validate(
+        {
+            "metric_id": metric,
+            "dimension": "month",
+            "period": "explicit",
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
+            "factory_id": "abc".index(letter.group(1)) + 1 if letter else None,
+            "territory": hints.get("territory") if metric == "revenue" else None,
+            "limit": 100,
+            "needs_clarification": False,
+            "clarification_question": None,
+            "zero_scrap_only": False,
+        }
+    )
+    try:
+        authorize(intent, user["role"])
+        check_definition(intent, state.dictionary)
+        plan = validate(
+            build(intent, user["role"], anchor),
+            intent,
+            user["role"],
+            trusted_template=True,
+        )
+    except PermissionError:
+        raise
+    except ValueError as error:
+        return 200, response(
+            "needs_clarification",
+            friendly(error, body.language),
+            request_id,
+            conversation_id,
+        )
+    rows = run_query(state.warehouse, plan, budget)
+    months = [str(r["month"]) for r in rows]
+    series = [float(r[metric]) for r in rows]
+    horizon, capped = forecast_horizon(body.question, end)
+    try:
+        if not contiguous(months):
+            raise ForecastRefused("gaps")
+        result = make_forecast(
+            series, horizon, settings.forecast_min_months, settings.forecast_max_mape
+        )
+    except ForecastRefused as refusal:
+        facts = refusal.facts
+        miss = float(facts.get("mape", 0)) * 100
+        limit = float(facts.get("limit", 0)) * 100
+        why = {
+            "history": (
+                f"Chỉ có {facts.get('have')} tháng lịch sử đầy đủ, cần ít nhất "
+                f"{facts.get('need')}.",
+                f"Only {facts.get('have')} complete months exist; at least "
+                f"{facts.get('need')} are needed.",
+            ),
+            "error": (
+                f"Phương pháp tốt nhất vẫn lệch {miss:.0f}% khi kiểm thử trên 6 tháng "
+                f"gần nhất (ngưỡng {limit:.0f}%), nên số dự báo không đáng tin.",
+                f"Even the best method missed the last 6 months by {miss:.0f}% "
+                f"(limit {limit:.0f}%), so a forecast is not reliable.",
+            ),
+            "gaps": (
+                "Chuỗi tháng có khoảng trống nên không dự báo được.",
+                "The monthly series has gaps, so it cannot be forecast.",
+            ),
+            "zero_history": (
+                "Lịch sử toàn bằng 0 nên không dự báo được.",
+                "The history is all zero, so it cannot be forecast.",
+            ),
+        }[refusal.reason][0 if vi else 1]
+        text_out = (
+            f"Tôi không đưa ra dự báo: {why} Bạn có thể xem xu hướng lịch sử thay thế."
+            if vi
+            else f"I am not offering a forecast: {why} You can look at the historical "
+            "trend instead."
+        )
+        return 200, response(
+            "needs_clarification", text_out, request_id, conversation_id
+        )
+    shown = list(zip(months, series))[-12:]
+    future = next_months(end, horizon)
+    table = [
+        {
+            "month": m,
+            "actual": f"{v:.2f}",
+            "forecast": None,
+            "lower": None,
+            "upper": None,
+        }
+        for m, v in shown
+    ] + [
+        {
+            "month": d.isoformat(),
+            "actual": None,
+            "forecast": f"{result.values[i]:.2f}",
+            "lower": f"{result.lower[i]:.2f}",
+            "upper": f"{result.upper[i]:.2f}",
+        }
+        for i, d in enumerate(future)
+    ]
+    viz = validate_viz(
+        VizConfig(type="line", x="month", y=["actual", "forecast"], series=None), table
+    )
+    name = METRIC_NAMES[metric][0 if vi else 1]
+    total = sum(result.values)
+    first_m, last_m = future[0], future[-1]
+    trend = (
+        (
+            f" Xu hướng {'tăng' if result.slope >= 0 else 'giảm'} khoảng "
+            f"{abs(result.slope):,.0f} mỗi tháng."
+            if vi
+            else f" The trend is {'up' if result.slope >= 0 else 'down'} about "
+            f"{abs(result.slope):,.0f} per month."
+        )
+        if result.method == "linear_trend"
+        else ""
+    )
+    method = {
+        "linear_trend": ("đường xu hướng tuyến tính", "a straight-line trend"),
+        "recent_average": ("trung bình 6 tháng gần nhất", "the last-six-month average"),
+    }[result.method][0 if vi else 1]
+    cap_note = (
+        (" (đã giới hạn 12 tháng)" if vi else " (limited to 12 months)")
+        if capped
+        else ""
+    )
+    answer_text = (
+        f"Dự báo, không phải số liệu đã ghi nhận: {name} từ {first_m:%m/%Y} đến "
+        f"{last_m:%m/%Y}{cap_note} khoảng {total:,.0f} tổng cộng, mỗi tháng trong "
+        f"khoảng {min(result.lower):,.0f} đến {max(result.upper):,.0f} (tin cậy 95%)."
+        f"{trend} Dùng {method} trên {result.history_months} tháng đã ghi nhận; sai số "
+        f"kiểm thử trên 6 tháng gần nhất là {result.backtest_mape * 100:.0f}%."
+        if vi
+        else f"Forecast, not recorded data: {name} from {first_m:%Y-%m} to "
+        f"{last_m:%Y-%m}{cap_note} about {total:,.0f} in total, each month between "
+        f"{min(result.lower):,.0f} and {max(result.upper):,.0f} (95% interval)."
+        f"{trend} Uses {method} on {result.history_months} recorded months; the error "
+        f"on the last 6 months was {result.backtest_mape * 100:.0f}%."
+    )
+    payload = response("ok", "Results found", request_id, conversation_id)
+    payload.update(
+        table=table,
+        viz_config=viz.model_dump(),
+        chart_fallback=False,
+        answer_text=answer_text,
+        llm_calls=0,
+        sources={
+            "source": "Adventureworks",
+            "sql": plan.sql,
+            "parameters": {
+                k: str(v) if isinstance(v, date) else v for k, v in plan.params.items()
+            },
+            "retrieved_at": datetime.now(timezone.utc).isoformat(),
+            "metric_versions": {metric: plan.version},
+            "data_as_of": anchor.isoformat(),
+            "anchor_source": state.readiness["anchor_source"],
+            "references": [],
+            "forecast": {
+                "is_forecast": True,
+                "method": result.method,
+                "method_version": METHOD_VERSION,
+                "history_months": result.history_months,
+                "history_window": [start.isoformat(), end.isoformat()],
+                "horizon_months": horizon,
+                "backtest_mape": round(result.backtest_mape, 4),
+                "interval": "point forecast ± 1.96 x residual sigma",
+                "residual_sigma": round(result.residual_std, 2),
+            },
+        },
+    )
+    save_context(
+        storage,
+        conversation_id,
+        user["id"],
+        (prior or {}).get("slots") or {},
+        None,
+        next_turns(prior, body.question, None),
+    )
+    persist(
+        storage,
+        user["id"],
+        body.question,
+        metric,
+        authorize(intent, user["role"]),
+        payload,
+    )
+    return 200, payload
+
+
 def answer(
     body: AskRequest,
     user: dict[str, Any],
@@ -209,6 +469,7 @@ def answer(
         settings.request_timeout_seconds, settings.llm_max_calls_per_request
     )
     metric_id: str | None = None
+    audit_outcome: str | None = None
     outcome = "technical_failure"
     query_path: str | None = None
     try:
@@ -235,7 +496,100 @@ def answer(
                 conversation_id,
             )
         anchor = date.fromisoformat(state.readiness["data_as_of"])
+        talk = converse(body.question, body.language, state.dictionary)
+        if talk:
+            # Small talk and "what is X" are answered from fixed vocabulary.
+            save_context(
+                storage,
+                conversation_id,
+                user["id"],
+                (prior or {}).get("slots") or {},
+                None,
+                next_turns(prior, body.question, talk),
+            )
+            result = response("ok", "Results found", request_id, conversation_id)
+            result.update(answer_text=talk, llm_calls=0)
+            outcome = "ok"
+            return 200, result
+        if asks_materials(body.question):
+            reply = no_materials(body.language)
+            outcome = "needs_clarification"
+            save_context(
+                storage,
+                conversation_id,
+                user["id"],
+                (prior or {}).get("slots") or {},
+                None,
+                next_turns(prior, body.question, reply),
+            )
+            return 200, response(outcome, reply, request_id, conversation_id)
+        if asks_forecast(body.question):
+            # A forecast is computed here from recorded months, labelled as such,
+            # and refused when the history cannot support it.
+            try:
+                status_code, result = run_forecast(
+                    body,
+                    user,
+                    state,
+                    budget,
+                    anchor,
+                    request_id,
+                    conversation_id,
+                    prior,
+                )
+            except PermissionError:
+                outcome = "denied"
+                return 403, response(
+                    outcome,
+                    "Data is outside your access scope",
+                    request_id,
+                    conversation_id,
+                )
+            outcome = result["status"]
+            return status_code, result
         target = reshape_kind(body.question)
+        follow = None if target else analysis_kind(body.question)
+        if follow and not re.search(METRIC_WORDS, fold(body.question)):
+            latest = latest_in_conversation(
+                storage, user["id"], conversation_id, user["role"]
+            )
+            previous = (latest or {}).get("payload") or {}
+            text_answer = (
+                analyze(follow, previous["table"], latest["metric_id"], body.language)
+                if latest
+                and previous.get("table")
+                and latest["metric_id"] in METRIC_NAMES
+                else None
+            )
+            if text_answer and latest:
+                result = response("ok", "Results found", request_id, conversation_id)
+                result.update(
+                    table=previous["table"],
+                    sources=previous["sources"],
+                    viz_config=TABLE.model_dump(),
+                    chart_fallback=True,
+                    answer_text=text_answer,
+                    llm_calls=0,
+                )
+                save_context(
+                    storage,
+                    conversation_id,
+                    user["id"],
+                    (prior or {}).get("slots") or {},
+                    None,
+                    next_turns(prior, body.question, None),
+                )
+                persist(
+                    storage,
+                    user["id"],
+                    body.question,
+                    latest["metric_id"],
+                    latest["factory_id"],
+                    result,
+                    latest["domain"],
+                )
+                outcome = result["status"]
+                return 200, result
         if target:
             latest = latest_in_conversation(
                 storage, user["id"], conversation_id, user["role"]
@@ -352,7 +706,7 @@ def answer(
                 )
             except ValueError as error:
                 outcome = "needs_clarification"
-                question = str(error)
+                question = friendly(error, body.language)
                 save_context(
                     storage,
                     conversation_id,
@@ -392,6 +746,7 @@ def answer(
                 logger.warning(
                     "Request %s SQL proposal rejected: %s", request_id, error
                 )
+                audit_outcome = "policy_violation"  # recorded, not an access denial
                 outcome = "needs_clarification"
                 question = (
                     "Tôi chưa tạo được truy vấn đã được kiểm chứng cho yêu cầu này. "
@@ -418,7 +773,7 @@ def answer(
             )
         except ValueError as error:
             outcome = "needs_clarification"
-            question = str(error)
+            question = friendly(error, body.language)
             save_context(
                 storage,
                 conversation_id,
@@ -547,5 +902,5 @@ def answer(
             outcome,
             query_path,
         )
-        if outcome == "denied":
-            audit(storage, user["id"], request_id, outcome, metric_id)
+        if outcome == "denied" or audit_outcome:
+            audit(storage, user["id"], request_id, audit_outcome or outcome, metric_id)

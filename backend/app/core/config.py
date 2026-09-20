@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     # Build a Structured Intent locally when the wording is unambiguous, sparing a
     # model call. Turn off to send every question to the LLM.
     local_intent_enabled: bool = True
+    # Forecasting: at least this many complete months, and a hold-out error no worse
+    # than this share, otherwise the request is refused rather than answered weakly.
+    forecast_min_months: int = Field(default=24, ge=12)
+    forecast_max_mape: float = Field(default=0.35, gt=0, le=1)
     external_results_enabled: bool = False
     external_metadata_enabled: bool = False
 

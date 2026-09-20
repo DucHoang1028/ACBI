@@ -349,3 +349,127 @@ def test_named_countries_filter_the_answer() -> None:
     assert intent_hints("Doanh thu của Đức và Anh năm 2023")["territory"] == (
         "Germany|United Kingdom"
     )
+
+
+def test_answers_read_the_rows_instead_of_repeating_a_template() -> None:
+    from datetime import date
+
+    from app.presentation.analysis import analysis_kind, analyze
+    from app.presentation.summary import factual
+
+    rows = [
+        {"territory": "France", "revenue": "1664041.62", "sample_count": 1030},
+        {"territory": "Germany", "revenue": "1548206.97", "sample_count": 1048},
+    ]
+    text = analyze("higher", rows, "revenue", "vi")
+    assert text is not None
+    assert text.startswith("France cao hơn Germany: 1.664.041,62 so với 1.548.206,97")
+    assert "115.834,65" in text and "+7,5%" in text
+    assert "Germany thấp hơn" not in text
+    lower = analyze("lower", rows, "revenue", "vi")
+    assert lower is not None and lower.startswith("Germany thấp hơn France")
+    total = analyze("total", rows, "revenue", "vi")
+    assert total is not None and "3.212.248,59" in total
+    assert analysis_kind("giữa 2 cái thì cái nào nhiều hơn") == "higher"
+    assert analysis_kind("tổng cộng là bao nhiêu") == "total"
+    assert analysis_kind("Chào bạn") is None
+    summary = factual("revenue", rows, date(2025, 1, 1), date(2026, 1, 1), "vi")
+    assert "France cao hơn Germany" in summary and "Chi tiết trong bảng" not in summary
+
+
+def test_internal_errors_never_reach_the_user() -> None:
+    from app.presentation.messages import Explained, friendly
+
+    known = friendly(ValueError("Specify both start and end dates"), "vi")
+    assert "từ ngày nào" in known
+    assert "start and end" not in known
+    odd = friendly(ValueError("KeyError: 'salesorderid' at line 42"), "en")
+    assert "salesorderid" not in odd and "line 42" not in odd
+    assert friendly(Explained("Custom note"), "vi") == "Custom note"
+
+
+def test_definitions_and_small_talk_come_from_fixed_vocabulary() -> None:
+    from pathlib import Path
+
+    import yaml
+    from app.conversation.glossary import converse
+
+    path = Path(__file__).resolve().parents[3] / "data/business_dictionary"
+    dictionary = yaml.safe_load((path / "dictionary.yaml").read_text("utf-8"))
+    de = converse("germany trong dữ liệu bạn nói tiếng việt là gì", "vi", dictionary)
+    assert de and "Germany là Đức" in de
+    rev = converse("Doanh thu là gì", "vi", dictionary)
+    assert (
+        rev and "SUM(sales.salesorderheader.subtotal)" in rev and "Phiên bản 1" in rev
+    )
+    assert converse("Chào bạn", "vi", dictionary)
+    assert converse("bạn làm được gì", "vi", dictionary)
+    assert converse("Doanh thu tháng này là gì", "vi", dictionary) is None
+    assert converse("Doanh thu theo khu vực năm 2024", "vi", dictionary) is None
+
+
+def test_forecast_requests_are_declined_not_answered_as_empty_data() -> None:
+    from app.conversation.glossary import asks_forecast
+
+    asked = (
+        "Dựa trên doanh thu của đức và pháp thì bạn có dự đoán được trong năm 2026 "
+        "doanh thu sẽ phát triển theo hướng nào",
+        "Dự báo sản lượng tháng tới",
+        "Vật tư nào có nguy cơ thiếu cho kế hoạch sản xuất tuần tới?",
+        "Forecast revenue for next year",
+        "Doanh thu quý sau sẽ ra sao",
+    )
+    for text in asked:
+        assert asks_forecast(text), text
+    recorded = (
+        "Doanh thu năm 2024",
+        "Xu hướng doanh thu theo tháng năm 2024",
+        "Doanh thu năm ngoái",
+        "Doanh thu năm 2030",  # a named future year is still a plain no-data query
+        "Sản lượng tháng trước",
+    )
+    for text in recorded:
+        assert not asks_forecast(text), text
+
+
+def test_efficiency_and_unsupported_breakdowns_ask_instead_of_guessing() -> None:
+    from app.conversation.glossary import asks_materials
+    from app.conversation.intent import clarification_text, merged_intent
+
+    blank = intent(
+        metric_id="production_output", period="today", needs_clarification=False
+    )
+    eff = merged_intent(
+        blank, None, "Hiệu suất các dây chuyền sản xuất hôm nay như thế nào?"
+    )
+    assert eff.missing_fields == ["efficiency"]
+    assert "hoàn thành đúng hạn" in clarification_text(eff, "vi")
+    named = merged_intent(blank, None, "Sản lượng hôm nay, hiệu suất theo sản lượng")
+    assert named.missing_fields != ["efficiency"]
+
+    by_staff = merged_intent(
+        intent(period="last_year", needs_clarification=False),
+        None,
+        "Doanh thu theo nhân viên bán hàng năm 2024",
+    )
+    assert by_staff.missing_fields == ["dimension"]
+    assert "nhân viên bán hàng" in clarification_text(by_staff, "vi")
+    assert asks_materials("Vật tư nào có nguy cơ thiếu cho kế hoạch sản xuất tuần tới?")
+    assert not asks_materials("Sản lượng tuần trước")
+
+
+def test_on_time_rate_is_a_template_metric_with_its_own_wording() -> None:
+    from datetime import date
+
+    from app.conversation.intent import local_intent
+    from app.query.builder import build, supports
+
+    on_time = intent(metric_id="on_time_rate", period="last_month")
+    assert supports(on_time)
+    plan = build(on_time, "production", date(2025, 6, 29))
+    assert "w.enddate<=w.duedate" in plan.sql and "on_time_rate" in plan.sql
+    hints_local = local_intent("Tỷ lệ hoàn thành đúng hạn theo dây chuyền năm 2024")
+    assert hints_local and hints_local.metric_id == "on_time_rate"
+    assert hints_local.dimension == "production_line"
+    today = local_intent("Sản lượng hôm nay")
+    assert today and today.period == "today"

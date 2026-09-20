@@ -16,7 +16,13 @@ from app.presentation.charts import TABLE, VizConfig
 
 logger = logging.getLogger("acbi.llm")
 
-METRICS = ("revenue", "sales_growth", "production_output", "defect_rate")
+METRICS = (
+    "revenue",
+    "sales_growth",
+    "production_output",
+    "defect_rate",
+    "on_time_rate",
+)
 DIMENSIONS = (
     "none",
     "sales_territory",
@@ -30,6 +36,10 @@ DIMENSIONS = (
     "scrap_reason",
 )
 PERIODS = (
+    "today",
+    "yesterday",
+    "this_week",
+    "last_week",
     "this_month",
     "last_month",
     "this_quarter",
@@ -233,7 +243,10 @@ class GroqClient:
         system = (
             "Interpret a Vietnamese or English business question as intent. "
             "Approved metrics: revenue=header subtotal, sales_growth=period revenue change, "
-            "production_output=good produced units, defect_rate=scrapped/ordered quantity. "
+            "production_output=good produced units, defect_rate=scrapped/ordered quantity, "
+            "on_time_rate=share of work orders finished by their due date. "
+            "'Hiệu suất'/efficiency/performance of a line has no single meaning: ask which of "
+            "production_output, defect_rate or on_time_rate is wanted. "
             "Unknown metrics or multiple metrics require clarification; never substitute. "
             "Vietnamese wording maps naturally: doanh số=sales/revenue, sản xuất or sản lượng=production_output, "
             "and tỷ lệ lỗi or phế phẩm=defect_rate. Lợi nhuận/profit has no approved definition, so explain that "
@@ -241,6 +254,7 @@ class GroqClient:
             "Dimensions: none, sales_territory, month, week, day, product, product_category, "
             "production_line, factory, scrap_reason. Dates are resolved by the backend. "
             "Relative dates ALWAYS use context.data_as_of, never the wall clock. "
+            "'hôm nay'=today, 'hôm qua'=yesterday, 'tuần này'=this_week, 'tuần trước'=last_week, "
             "'tháng này'=this_month, 'tháng trước'=last_month, 'quý này'=this_quarter, "
             "'quý trước'=last_quarter, 'năm trước'=last_year. These are fully specified periods; "
             "do not ask for month or year again. A quarter is three months, never a full year. "

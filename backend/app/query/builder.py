@@ -51,13 +51,20 @@ def resolve_dates(intent: Intent, anchor: date) -> tuple[date, date]:
 
 def authorize(intent: Intent, role: str) -> int | None:
     metric = intent.metric_id
-    if metric not in {"revenue", "sales_growth", "production_output", "defect_rate"}:
+    if metric not in {
+        "revenue",
+        "sales_growth",
+        "production_output",
+        "defect_rate",
+        "on_time_rate",
+    }:
         raise ValueError("Unknown metric")
     domain = {
         "revenue": "sales",
         "sales_growth": "sales",
         "production_output": "production",
         "defect_rate": "quality",
+        "on_time_rate": "production",
     }[metric]
     factory_id: int | None
     if role == "production":
@@ -118,6 +125,8 @@ def prepare(intent: Intent, role: str, anchor: date) -> QueryPlan:
 
 
 def supports(intent: Intent) -> bool:
+    if intent.metric_id == "on_time_rate":
+        return True  # template only; an unsupported grouping is refused, not guessed
     if intent.dimension == "week":
         return False
     if intent.metric_id == "sales_growth" and intent.dimension != "none":
@@ -321,6 +330,11 @@ def production_sql(
         )
     if metric == "production_output":
         value = "SUM(w.stockedqty) AS production_output"
+    elif metric == "on_time_rate":
+        value = (
+            "COUNT(*) FILTER (WHERE w.enddate<=w.duedate)::numeric"
+            "/NULLIF(COUNT(*),0) AS on_time_rate"
+        )
     else:
         value = "SUM(w.scrappedqty)::numeric/NULLIF(SUM(w.orderqty),0) AS defect_rate"
         if dimension in {"product", "scrap_reason"}:

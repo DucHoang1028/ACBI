@@ -1,4 +1,4 @@
-﻿"""The evaluation sets stay well formed: enough questions, every kind covered."""
+"""The evaluation sets stay well formed: enough questions, every kind covered."""
 
 from pathlib import Path
 

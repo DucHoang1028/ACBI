@@ -13,6 +13,10 @@ def date_hints(question: str) -> dict[str, str | None]:
         if unicodedata.category(c) != "Mn"
     )
     aliases = {
+        "today": r"\b(?:hom nay|today)\b",
+        "yesterday": r"\b(?:hom qua|yesterday)\b",
+        "this_week": r"\b(?:tuan nay|this week)\b",
+        "last_week": r"\b(?:tuan truoc|last week)\b",
         "this_month": r"\b(?:thang nay|this month)\b",
         "last_month": r"\b(?:thang truoc|last month)\b",
         "this_quarter": r"\b(?:quy nay|this quarter)\b",
@@ -182,6 +186,10 @@ def intent_hints(question: str) -> dict[str, object]:
         found.append("production_output")
     if re.search(r"\b(?:ty le loi|ty le phe pham|phe pham|scrap|defect)\b", value):
         found.append("defect_rate")
+    if re.search(
+        r"\b(?:dung han|tre han|dung tien do|on[- ]time|late orders?)\b", value
+    ):
+        found.append("on_time_rate")
     # Profit has no approved definition; several metrics need a clarification.
     if len(found) == 1 and not re.search(r"\b(?:loi nhuan|profit)\b", value):
         hints["metric_id"] = found[0]
@@ -248,6 +256,15 @@ def month_start(day: date, delta: int = 0) -> date:
 
 def resolve_period(name: str, anchor: date) -> tuple[date, date]:
     tomorrow = anchor + timedelta(days=1)
+    monday = anchor - timedelta(days=anchor.weekday())
+    if name == "today":
+        return anchor, tomorrow
+    if name == "yesterday":
+        return anchor - timedelta(days=1), anchor
+    if name == "this_week":
+        return monday, tomorrow
+    if name == "last_week":
+        return monday - timedelta(days=7), monday
     if name == "this_month":
         return month_start(anchor), tomorrow
     if name == "last_month":

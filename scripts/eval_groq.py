@@ -96,6 +96,8 @@ def check_edge(item: dict[str, Any], body: dict[str, Any], anchor: date) -> list
         if body["status"] == "denied" and body.get("table"):
             problems.append("denied response carried data")
         return problems
+    if item.get("says") and item["says"] not in (body.get("answer_text") or ""):
+        problems.append(f"answer lacks {item['says']!r}: {body.get('answer_text')}")
     sources = body.get("sources") or {}
     if item.get("metric") and item["metric"] not in (
         sources.get("metric_versions") or {}
@@ -126,7 +128,7 @@ def check_edge(item: dict[str, Any], body: dict[str, Any], anchor: date) -> list
         actual = body["table"][0].get(item["metric"])
         if expected_value is None or not close(item["metric"], expected_value, actual):
             problems.append(f"value {actual} != reference {expected_value}")
-    if not body.get("saved"):
+    if body.get("table") and not body.get("saved"):
         problems.append("result not saved")
     return problems
 

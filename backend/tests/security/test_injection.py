@@ -1,4 +1,4 @@
-﻿"""Questions and retrieved text are data: they cannot change validation or scope."""
+"""Questions and retrieved text are data: they cannot change validation or scope."""
 
 from datetime import date
 
