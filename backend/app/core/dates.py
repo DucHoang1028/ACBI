@@ -79,7 +79,7 @@ STACK = r"\b(?:xep chong|cot chong|stacked)\b"
 DIMENSION_WORDS = {
     "month": r"(?:theo|moi|hang|tung) thang|by month|monthly",
     "sales_territory": r"khu vuc|territor(?:y|ies)|regions?",
-    "product_category": r"danh muc|categor(?:y|ies)",
+    "product_category": r"danh muc|nhom san pham|loai san pham|categor(?:y|ies)",
     "production_line": r"day chuyen|production lines?",
     "factory": r"nha may|factory|factories",
 }
@@ -96,6 +96,34 @@ def stacked_dimensions(value: str) -> tuple[str, str] | None:
         return None
     first, second = found[0][1], found[1][1]
     return (second, first) if second == "month" else (first, second)
+
+
+def fold(question: str) -> str:
+    """Lowercase, accent-free text for keyword matching."""
+    return "".join(
+        c
+        for c in unicodedata.normalize("NFD", question.lower())
+        if unicodedata.category(c) != "Mn"
+    ).replace("đ", "d")
+
+
+def single_dimension(value: str) -> str | None:
+    """'none' when no breakdown is named, the name when one is, None if unclear."""
+    words = {
+        **DIMENSION_WORDS,
+        "product": r"san pham|product",
+        "scrap_reason": r"ly do|scrap reason",
+    }
+    found = {
+        name
+        for name, pattern in words.items()
+        if re.search(rf"\b(?:{pattern})\b", value)
+    }
+    if "product_category" in found:
+        found.discard("product")
+    if len(found) > 1:
+        return None
+    return next(iter(found), "none")
 
 
 def is_share_question(question: str) -> bool:

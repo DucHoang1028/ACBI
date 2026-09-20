@@ -19,7 +19,14 @@ from app.ai.budget import RequestBudget
 from app.ai.client import FakeLLM, Intent
 from app.api.auth import current_user
 from app.chat.service import audit, get_context, save_context
-from app.core.dates import intent_hints, is_confirmation, is_share_question
+from app.core.dates import (
+    TERRITORIES,
+    fold,
+    intent_hints,
+    is_confirmation,
+    is_share_question,
+    single_dimension,
+)
 from app.history.service import latest_in_conversation
 from app.history.service import save as save_result
 from app.presentation.charts import TABLE, VizConfig, describe, validate_viz
@@ -90,6 +97,69 @@ def merged_intent(
             missing_fields=[],
         )
     return Intent.model_validate(current)
+
+
+# Anything that needs judgement (ranking, filters, averages) goes to the model.
+LOCAL_BLOCK = (
+    r"\b(?:top|cao nhat|thap nhat|lon nhat|nho nhat|chi|khong|trung binh|xep hang|"
+    r"sap xep|moi nhat|tuan|ngay|week|weekly|daily|average|highest|lowest|only|"
+    r"except)\b"
+)
+
+
+LOCAL_BREAKDOWN = (
+    r"(?:thang|khu vuc|territor|region|danh muc|nhom san pham|loai san pham|"
+    r"categor|san pham|product|day chuyen|production line|nha may|factory|"
+    r"ly do|scrap reason|quy|nam|month|year)"
+)
+
+
+def local_intent(question: str) -> Intent | None:
+    """Build a complete Structured Intent from unambiguous wording, no model call.
+
+    Returns None whenever the wording needs interpretation, so the model decides.
+    """
+    value = fold(question)
+    hints = intent_hints(question)
+    if not hints.get("metric_id") or hints.get("period") in (None, "recently"):
+        return None
+    if re.search(LOCAL_BLOCK, value) or re.search(r"\bso voi\b", value):
+        return None
+    factory_id: int | None = None
+    letter = re.search(r"\b(?:nha may|factory)\s*([abc])\b", value)
+    if letter:
+        factory_id = "abc".index(letter.group(1)) + 1
+        value = value.replace(letter.group(0), " ")
+    if any(
+        not re.match(LOCAL_BREAKDOWN, rest.group(1))
+        for rest in re.finditer(r"\b(?:theo|by|per|moi|tung)\s+(.+)", value)
+    ):
+        return None  # a breakdown we do not recognise: let the model decide
+    dimension = str(hints.get("dimension") or single_dimension(value) or "")
+    if not dimension or (
+        dimension == "none" and re.search(r"\b(?:nha may|factory)\b", value)
+    ):
+        return None
+    if not hints.get("territory") and any(
+        re.search(rf"\b(?:{pattern})\b", value) for pattern in TERRITORIES.values()
+    ):
+        return None
+    return Intent.model_validate(
+        {
+            "metric_id": hints["metric_id"],
+            "dimension": dimension,
+            "period": hints["period"],
+            "start_date": hints.get("start_date"),
+            "end_date": hints.get("end_date"),
+            "factory_id": factory_id,
+            "territory": hints.get("territory"),
+            "limit": hints.get("limit", 100),
+            "needs_clarification": False,
+            "clarification_question": None,
+            "zero_scrap_only": False,
+            "series_dimension": hints.get("series_dimension", "none"),
+        }
+    )
 
 
 def next_turns(
@@ -681,7 +751,9 @@ def answer(
             "pending_question": prior.get("pending_question") if prior else None,
             "turns": (prior or {}).get("turns") or [],
         }
-        raw = client.interpret(body.question, context, budget)
+        raw = local_intent(body.question) or client.interpret(
+            body.question, context, budget
+        )
         intent = merged_intent(raw, prior, body.question)
         metric_id = intent.metric_id
         share_of: list[str] | None = None

@@ -145,9 +145,9 @@ def main() -> None:
         ) < Decimal("0.05"), "stacked rows must sum to the reference total"
         stacked_production = ask("manager", output)
         assert stacked_production["status"] == "ok", stacked_production
-        assert stacked_production["viz_config"]["type"] == "stacked_bar", (
-            stacked_production["viz_config"]
-        )
+        assert (
+            stacked_production["viz_config"]["type"] == "stacked_bar"
+        ), stacked_production["viz_config"]
         kpi = ask("manager", KPI)
         assert kpi["viz_config"]["type"] == "kpi_card" and len(kpi["table"]) == 1, kpi
         assert abs(Decimal(str(kpi["table"][0]["revenue"])) - revenue_2023) < Decimal(

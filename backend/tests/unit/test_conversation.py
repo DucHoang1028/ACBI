@@ -228,3 +228,20 @@ def test_all_chart_types_are_recognised_and_mapped() -> None:
 
     with pytest.raises(ValueError):
         auto_viz("kpi_card", rows)  # four rows, not one value
+
+
+def test_local_intent_only_for_unambiguous_questions() -> None:
+    from app.api.chat import local_intent
+
+    ok = local_intent("Doanh thu theo danh mục sản phẩm năm 2024 dạng biểu đồ tròn")
+    assert ok and (ok.metric_id, ok.dimension) == ("revenue", "product_category")
+    factory = local_intent("Tỷ lệ phế phẩm của Factory A tháng trước")
+    assert factory and factory.factory_id == 1
+    for text in (
+        "Top 5 sản phẩm bán chạy năm 2024",
+        "Doanh thu của Canada quý trước",
+        "Weekly revenue last month",
+        "Doanh thu theo phân khúc khách hàng năm 2024",
+        "Có vấn đề gì không?",
+    ):
+        assert local_intent(text) is None, text

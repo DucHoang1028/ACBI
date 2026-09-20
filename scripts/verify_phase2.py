@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "backend"))
 
 from app.ai.client import FakeLLM, Intent  # noqa: E402
-from app.api.chat import special_kind  # noqa: E402
+from app.api.chat import local_intent, special_kind  # noqa: E402
 from app.core.dates import month_start, resolve_period  # noqa: E402
 from app.main import app  # noqa: E402
 
@@ -193,7 +193,14 @@ def main() -> None:
         # Phase 3 also proposes a chart for each nonempty result.
         # Shortcut answers (see special_kind) make no LLM calls.
         shortcuts = sum(special_kind(q["question"]) is not None for q in questions)
-        assert fake.calls == len(questions) - 1 - shortcuts + sum(
+        # Unambiguous questions are interpreted locally, with no model call.
+        local = sum(
+            q["user"] != "it_admin"  # rejected before interpretation
+            and special_kind(q["question"]) is None
+            and local_intent(q["question"]) is not None
+            for q in questions
+        )
+        assert fake.calls == len(questions) - 1 - shortcuts - local + sum(
             q["expected_status"] == "ok" for q in questions
         )
         # A follow-up inherits the same user's metric and period slots.
