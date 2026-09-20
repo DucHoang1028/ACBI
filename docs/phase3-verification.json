@@ -1,0 +1,49 @@
+{
+  "checked_at": "2026-09-20T02:50:51.315332+00:00",
+  "model": "FakeLLM",
+  "rag_cases": 6,
+  "passed": 6,
+  "results": [
+    {
+      "id": "P3-01",
+      "status": "ok",
+      "rows": 5,
+      "llm_calls": 3
+    },
+    {
+      "id": "P3-02",
+      "status": "ok",
+      "rows": 21,
+      "llm_calls": 3
+    },
+    {
+      "id": "P3-03",
+      "status": "ok",
+      "rows": 100,
+      "llm_calls": 3
+    },
+    {
+      "id": "P3-04",
+      "status": "ok",
+      "rows": 5,
+      "llm_calls": 3
+    },
+    {
+      "id": "P3-05",
+      "status": "ok",
+      "rows": 10,
+      "llm_calls": 3
+    },
+    {
+      "id": "P3-06",
+      "status": "no_data",
+      "rows": 0,
+      "llm_calls": 2
+    }
+  ],
+  "denied_without_warehouse_sql": true,
+  "generated_formula_change_denied": true,
+  "invalid_chart_corrected": true,
+  "invalid_chart_fallback": true,
+  "live_rag_metadata_tested": false
+}

@@ -1,0 +1,119 @@
+schema_version: 1
+scope: Additional supported RAG patterns; FakeLLM supplies approved SQL examples.
+questions:
+  - id: P3-01
+    question: Weekly revenue last month
+    user: sales
+    metric_id: revenue
+    dimension: week
+    period: last_month
+    example: example:revenue:weekly
+    expected_status: ok
+    chart_type: line
+    reference_sql: |
+      SELECT date_trunc('week',orderdate)::date AS week,
+        sum(subtotal) AS revenue,count(*) AS sample_count
+      FROM sales.salesorderheader
+      WHERE orderdate>=:start AND orderdate<:end
+      GROUP BY week ORDER BY week
+  - id: P3-02
+    question: Daily production output last month for Factory A
+    user: production_a
+    metric_id: production_output
+    dimension: day
+    period: last_month
+    factory_id: 1
+    example: example:production_output:daily
+    expected_status: ok
+    chart_type: line
+    reference_sql: |
+      WITH terminal AS (
+        SELECT DISTINCT ON (workorderid) workorderid,locationid
+        FROM production.workorderrouting
+        ORDER BY workorderid,operationsequence DESC,locationid
+      )
+      SELECT w.enddate::date AS day,sum(w.orderqty-w.scrappedqty) AS production_output,
+        count(*) AS sample_count
+      FROM production.workorder w
+      JOIN terminal t USING(workorderid)
+      JOIN acbi_demo.location_factory f USING(locationid)
+      WHERE w.enddate>=:start AND w.enddate<:end AND f.factory_id=1
+      GROUP BY day ORDER BY day LIMIT 100
+  - id: P3-03
+    question: Daily defect rate last year
+    user: manager
+    metric_id: defect_rate
+    dimension: day
+    period: last_year
+    example: example:defect_rate:daily
+    expected_status: ok
+    chart_type: line
+    reference_sql: |
+      SELECT enddate::date AS day,
+        sum(scrappedqty)::numeric/nullif(sum(orderqty),0) AS defect_rate,
+        count(*) AS sample_count
+      FROM production.workorder
+      WHERE enddate>=:start AND enddate<:end
+      GROUP BY day ORDER BY day LIMIT 100
+  - id: P3-04
+    question: Weekly output last month for Factory B
+    user: manager
+    metric_id: production_output
+    dimension: week
+    period: last_month
+    factory_id: 2
+    example: example:production_output:weekly
+    expected_status: ok
+    chart_type: line
+    reference_sql: |
+      WITH terminal AS (
+        SELECT DISTINCT ON (workorderid) workorderid,locationid
+        FROM production.workorderrouting
+        ORDER BY workorderid,operationsequence DESC,locationid
+      )
+      SELECT date_trunc('week',w.enddate)::date AS week,
+        sum(w.orderqty-w.scrappedqty) AS production_output,count(*) AS sample_count
+      FROM production.workorder w
+      JOIN terminal t USING(workorderid)
+      JOIN acbi_demo.location_factory f USING(locationid)
+      WHERE w.enddate>=:start AND w.enddate<:end AND f.factory_id=2
+      GROUP BY week ORDER BY week
+  - id: P3-05
+    question: Sales growth by territory last month
+    user: manager
+    metric_id: sales_growth
+    dimension: sales_territory
+    period: last_month
+    example: example:sales_growth:territory
+    expected_status: ok
+    chart_type: bar
+    reference_sql: |
+      WITH periods AS (
+        SELECT territoryid,
+          sum(subtotal) FILTER (WHERE orderdate>=:start AND orderdate<:end) AS current_revenue,
+          sum(subtotal) FILTER (WHERE orderdate>=:baseline_start AND orderdate<:baseline_end) AS previous_revenue,
+          count(*) FILTER (WHERE orderdate>=:start AND orderdate<:end) AS current_count,
+          count(*) FILTER (WHERE orderdate>=:baseline_start AND orderdate<:baseline_end) AS previous_count
+        FROM sales.salesorderheader GROUP BY territoryid
+      )
+      SELECT p.territoryid,t.name AS territory,p.current_revenue,p.previous_revenue,
+        (p.current_revenue-p.previous_revenue)/nullif(p.previous_revenue,0) AS sales_growth
+      FROM periods p JOIN sales.salesterritory t USING(territoryid)
+      WHERE p.current_count>0 AND p.previous_count>0
+      ORDER BY p.territoryid
+  - id: P3-06
+    question: Weekly revenue in 2099
+    user: manager
+    metric_id: revenue
+    dimension: week
+    period: explicit
+    start_date: '2099-01-01'
+    end_date: '2100-01-01'
+    example: example:revenue:weekly
+    expected_status: no_data
+    reference_sql: |
+      SELECT date_trunc('week',orderdate)::date AS week,
+        sum(subtotal) AS revenue,count(*) AS sample_count
+      FROM sales.salesorderheader
+      WHERE orderdate>=:start AND orderdate<:end
+      GROUP BY week ORDER BY week

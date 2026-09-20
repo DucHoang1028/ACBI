@@ -1,0 +1,30 @@
+status: approved
+credentialPolicy: No passwords in YAML. Phase 1 creates local accounts with generated passwords and Argon2 hashes.
+users:
+- username: manager
+  role: manager
+  domains:
+  - sales
+  - production
+  - quality
+  factories: all
+  administration: false
+- username: sales
+  role: sales
+  domains:
+  - sales
+  factories: []
+  administration: false
+- username: production_a
+  role: production
+  domains:
+  - production
+  - quality
+  factories:
+  - 1
+  administration: false
+- username: it_admin
+  role: it_admin
+  domains: []
+  factories: []
+  administration: true

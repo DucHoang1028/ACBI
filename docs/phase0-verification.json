@@ -1,0 +1,60 @@
+{
+  "phase": 0,
+  "scope": "reference_data_preparation_only",
+  "generated_at": "2026-09-19T15:51:32.179309+00:00",
+  "database": "Adventureworks",
+  "data_as_of": "2025-06-29",
+  "sales_min_date": "2022-05-30",
+  "sales_max_date": "2025-06-29",
+  "anchor_source": "sales_max_orderdate",
+  "date_ranges": [
+    {
+      "field": "sales.orderdate",
+      "minimum": "2022-05-30",
+      "maximum": "2025-06-29"
+    },
+    {
+      "field": "production.enddate",
+      "minimum": "2022-06-12",
+      "maximum": "2025-06-16"
+    }
+  ],
+  "row_counts": {
+    "sales.salesorderheader": 31465,
+    "sales.salesorderdetail": 121317,
+    "sales.salesterritory": 10,
+    "production.workorder": 72591,
+    "production.workorderrouting": 67131,
+    "production.location": 14,
+    "production.product": 504,
+    "production.productsubcategory": 37,
+    "production.productcategory": 4,
+    "production.scrapreason": 16,
+    "acbi_demo.factory": 3,
+    "acbi_demo.location_factory": 14
+  },
+  "role": {
+    "username": "acbi_ro",
+    "default_read_only": "on",
+    "statement_timeout": "15s",
+    "elevated": false,
+    "can_use_hr_schema": false,
+    "can_update": false,
+    "can_create_public": false
+  },
+  "security_checks": {
+    "write_privileges_denied": "passed",
+    "restricted_hr_denied": "passed",
+    "statement_timeout": "passed"
+  },
+  "dictionary_sha256": "4da3ac3fff7b4e470d954e227e343feadf864cdc479b93a3997154a2fac2edf9",
+  "golden_sha256": "d5d15cfaf51e1c58bdc758a4698d68a5885da5779eb0bce602652bd6822a3d11",
+  "definition_status": "approved",
+  "llm_calls": 0,
+  "reconciliations": "territory totals, line/factory totals, Factory A scope, product allocation, observed zero rate: passed",
+  "query_path_evaluation": {
+    "structured_intent": "not implemented in Phase 0",
+    "rag_text_to_sql": "not implemented in Phase 0",
+    "QS1_QS8": "not claimed; runtime scenarios deferred to their build phases"
+  }
+}

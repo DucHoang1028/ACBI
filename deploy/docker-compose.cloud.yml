@@ -1,0 +1,37 @@
+# Apply after docker-compose.yml. Requires Docker Compose 2.24.4 or later.
+# The warehouse remains an independently administered external service.
+services:
+  web:
+    build:
+      target: cloud
+    restart: unless-stopped
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?Set a public DNS hostname pointing to this server}
+    ports: !override
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1:8081/health]
+  backend:
+    restart: unless-stopped
+    environment:
+      WAREHOUSE_SSLMODE: verify-full
+      PGSSLROOTCERT: /run/warehouse-ca.crt
+      # Only the web container can reach the unpublished HTTP service from edge.
+      # Caddy sets X-Forwarded-Proto itself; never publish backend port 8000.
+      FORWARDED_ALLOW_IPS: "*"
+    volumes:
+      - type: bind
+        source: ${WAREHOUSE_CA_FILE:?Set the absolute path to the warehouse CA certificate}
+        target: /run/warehouse-ca.crt
+        read_only: true
+        bind:
+          create_host_path: false
+  db:
+    restart: unless-stopped
+volumes:
+  caddy_data: {}
+  caddy_config: {}

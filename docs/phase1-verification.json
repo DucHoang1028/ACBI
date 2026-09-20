@@ -1,0 +1,22 @@
+{
+  "phase": 1,
+  "status": "passed",
+  "role_metric_counts": {
+    "manager": 4,
+    "sales": 2,
+    "production_a": 2,
+    "it_admin": 0
+  },
+  "checks": [
+    "login",
+    "metadata scope",
+    "admin boundary",
+    "refresh rotation",
+    "replay rejected",
+    "logout revocation",
+    "anonymous denied",
+    "invalid login",
+    "origin denied"
+  ],
+  "credentials_in_report": false
+}

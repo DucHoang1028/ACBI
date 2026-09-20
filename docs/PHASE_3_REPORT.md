@@ -1,0 +1,9 @@
+# Phase 3 verification — 20 September 2026
+
+Phase 3 adds approval-filtered BM25 retrieval, generated SQL proposals, a shared SQL policy, and model-proposed visualization mappings. The backend chooses a static query when it already supports the question. Other approved shapes, including weekly revenue and growth by territory, use retrieved definitions and examples. Every generated statement must pass parsing, table/column/function allowlists, formula checks, bound literals, date and factory scope enforcement, a row limit, and read-only execution. Invalid chart mappings fall back to a table.
+
+The local [Phase 3 verification record](phase3-verification.json) reconciles six new generated-query cases against independent reference SQL on the external AdventureWorks warehouse using FakeLLM. It includes Factory A/B scope, no-data handling, a rejected formula change, and chart correction/fallback. The original 40-question [Phase 2 suite](phase2-verification.json) also passes through the updated shared validator. The role and warehouse boundaries remain unchanged. After rebuilding both application containers, 30 unit tests, Ruff, Black, mypy, and the production web build passed. The live readiness endpoint reports Phase 3, anchor `2025-06-29`, and `advanced_analysis_enabled=false`.
+
+Groq's configured `openai/gpt-oss-120b` model was checked for availability, and one benign structured-intent call succeeded. The owner subsequently approved sending the [documented external context](PHASE_3_EXTERNAL_CONTEXT.md) to Groq. The local setting is now `EXTERNAL_METADATA_ENABLED=true`. A live weekly-revenue question returned five warehouse rows, a validated line chart and a saved result with three model calls. That single smoke test is not a broader live generated-SQL accuracy claim; the six-case evaluation still uses FakeLLM.
+
+Saved business results, voice, administrator workflows, and broader QS evaluation are covered in the [Phase 4 report](PHASE_4_REPORT.md).

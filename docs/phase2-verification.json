@@ -1,0 +1,211 @@
+{
+  "checked_at": "2026-09-20T02:50:41.651213+00:00",
+  "model": "FakeLLM",
+  "questions": 40,
+  "passed": 40,
+  "outcomes": [
+    {
+      "id": "GQ01",
+      "status": "ok",
+      "row_count": 1
+    },
+    {
+      "id": "GQ02",
+      "status": "ok",
+      "row_count": 1
+    },
+    {
+      "id": "GQ03",
+      "status": "ok",
+      "row_count": 1
+    },
+    {
+      "id": "GQ04",
+      "status": "ok",
+      "row_count": 1
+    },
+    {
+      "id": "GQ05",
+      "status": "ok",
+      "row_count": 1
+    },
+    {
+      "id": "GQ06",
+      "status": "ok",
+      "row_count": 1
+    },
+    {
+      "id": "GQ07",
+      "status": "ok",
+      "row_count": 8
+    },
+    {
+      "id": "GQ08",
+      "status": "ok",
+      "row_count": 12
+    },
+    {
+      "id": "GQ09",
+      "status": "ok",
+      "row_count": 29
+    },
+    {
+      "id": "GQ10",
+      "status": "ok",
+      "row_count": 3
+    },
+    {
+      "id": "GQ11",
+      "status": "ok",
+      "row_count": 1
+    },
+    {
+      "id": "GQ12",
+      "status": "ok",
+      "row_count": 1
+    },
+    {
+      "id": "GQ13",
+      "status": "ok",
+      "row_count": 1
+    },
+    {
+      "id": "GQ14",
+      "status": "ok",
+      "row_count": 3
+    },
+    {
+      "id": "GQ15",
+      "status": "ok",
+      "row_count": 3
+    },
+    {
+      "id": "GQ16",
+      "status": "ok",
+      "row_count": 1
+    },
+    {
+      "id": "GQ17",
+      "status": "ok",
+      "row_count": 10
+    },
+    {
+      "id": "GQ18",
+      "status": "ok",
+      "row_count": 3
+    },
+    {
+      "id": "GQ19",
+      "status": "ok",
+      "row_count": 1
+    },
+    {
+      "id": "GQ20",
+      "status": "ok",
+      "row_count": 1
+    },
+    {
+      "id": "GQ21",
+      "status": "ok",
+      "row_count": 100
+    },
+    {
+      "id": "GQ22",
+      "status": "ok",
+      "row_count": 17
+    },
+    {
+      "id": "GQ23",
+      "status": "ok",
+      "row_count": 12
+    },
+    {
+      "id": "GQ24",
+      "status": "ok",
+      "row_count": 1
+    },
+    {
+      "id": "GQ25",
+      "status": "ok",
+      "row_count": 1
+    },
+    {
+      "id": "GQ26",
+      "status": "ok",
+      "row_count": 10
+    },
+    {
+      "id": "GQ27",
+      "status": "ok",
+      "row_count": 3
+    },
+    {
+      "id": "GQ28",
+      "status": "ok",
+      "row_count": 1
+    },
+    {
+      "id": "GQ29",
+      "status": "no_data",
+      "row_count": 0
+    },
+    {
+      "id": "GQ30",
+      "status": "no_data",
+      "row_count": 0
+    },
+    {
+      "id": "GQ31",
+      "status": "no_data",
+      "row_count": 0
+    },
+    {
+      "id": "GQ32",
+      "status": "ok",
+      "row_count": 100
+    },
+    {
+      "id": "GQ33",
+      "status": "needs_clarification",
+      "row_count": 0
+    },
+    {
+      "id": "GQ34",
+      "status": "needs_clarification",
+      "row_count": 0
+    },
+    {
+      "id": "GQ35",
+      "status": "denied",
+      "row_count": 0
+    },
+    {
+      "id": "GQ36",
+      "status": "denied",
+      "row_count": 0
+    },
+    {
+      "id": "GQ37",
+      "status": "denied",
+      "row_count": 0
+    },
+    {
+      "id": "GQ38",
+      "status": "denied",
+      "row_count": 0
+    },
+    {
+      "id": "GQ39",
+      "status": "needs_clarification",
+      "row_count": 0
+    },
+    {
+      "id": "GQ40",
+      "status": "denied",
+      "row_count": 0
+    }
+  ],
+  "live_groq_tested": false,
+  "conversation_isolation": "passed",
+  "followup_slots": "passed"
+}

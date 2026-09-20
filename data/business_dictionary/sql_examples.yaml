@@ -1,0 +1,72 @@
+schema_version: 1
+examples:
+  - id: example:revenue:weekly
+    metric_id: revenue
+    approval_status: approved
+    description: Weekly revenue trend; doanh thu theo tuần. Week starts Monday. Uses the approved revenue definition v1.
+    sql: |
+      SELECT date_trunc('week',h.orderdate)::date AS week,
+             SUM(h.subtotal) AS revenue,COUNT(*) AS sample_count
+      FROM sales.salesorderheader h
+      WHERE h.orderdate>=:start AND h.orderdate<:end
+      GROUP BY 1 ORDER BY 1 LIMIT 100
+  - id: example:production_output:daily
+    metric_id: production_output
+    approval_status: approved
+    description: Daily output; sản lượng theo ngày. Approved output v1, dated by enddate.
+    sql: |
+      SELECT w.enddate::date AS day,SUM(w.orderqty-w.scrappedqty) AS production_output,
+             COUNT(*) AS sample_count
+      FROM production.workorder w
+      WHERE w.enddate>=:start AND w.enddate<:end
+      GROUP BY 1 ORDER BY 1 LIMIT 100
+  - id: example:production_output:weekly
+    metric_id: production_output
+    approval_status: approved
+    description: Weekly production output; sản lượng theo tuần. Week starts Monday, dated by enddate.
+    sql: |
+      SELECT date_trunc('week',w.enddate)::date AS week,
+             SUM(w.orderqty-w.scrappedqty) AS production_output,COUNT(*) AS sample_count
+      FROM production.workorder w
+      WHERE w.enddate>=:start AND w.enddate<:end
+      GROUP BY 1 ORDER BY 1 LIMIT 100
+  - id: example:defect_rate:daily
+    metric_id: defect_rate
+    approval_status: approved
+    description: Daily scrap rate; tỷ lệ phế phẩm theo ngày. Ratio, not percent points. Approved v1.
+    sql: |
+      SELECT w.enddate::date AS day,
+             SUM(w.scrappedqty)::numeric/NULLIF(SUM(w.orderqty),0) AS defect_rate,
+             COUNT(*) AS sample_count
+      FROM production.workorder w
+      WHERE w.enddate>=:start AND w.enddate<:end
+      GROUP BY 1 ORDER BY 1 LIMIT 100
+  - id: example:defect_rate:weekly
+    metric_id: defect_rate
+    approval_status: approved
+    description: Weekly defect rate; tỷ lệ phế phẩm theo tuần. Week starts Monday, dated by enddate.
+    sql: |
+      SELECT date_trunc('week',w.enddate)::date AS week,
+             SUM(w.scrappedqty)::numeric/NULLIF(SUM(w.orderqty),0) AS defect_rate,
+             COUNT(*) AS sample_count
+      FROM production.workorder w
+      WHERE w.enddate>=:start AND w.enddate<:end
+      GROUP BY 1 ORDER BY 1 LIMIT 100
+  - id: example:sales_growth:territory
+    metric_id: sales_growth
+    approval_status: approved
+    description: Revenue change by territory; tăng trưởng doanh thu theo vùng. Complete previous month or quarter, definition v1.
+    sql: |
+      WITH periods AS (
+        SELECT h.territoryid,
+          SUM(h.subtotal) FILTER (WHERE h.orderdate>=:start AND h.orderdate<:end) AS current_revenue,
+          SUM(h.subtotal) FILTER (WHERE h.orderdate>=:baseline_start AND h.orderdate<:baseline_end) AS previous_revenue,
+          COUNT(*) FILTER (WHERE h.orderdate>=:start AND h.orderdate<:end) AS current_count,
+          COUNT(*) FILTER (WHERE h.orderdate>=:baseline_start AND h.orderdate<:baseline_end) AS previous_count
+        FROM sales.salesorderheader h GROUP BY h.territoryid
+      )
+      SELECT p.territoryid,t.name AS territory,p.current_revenue,p.previous_revenue,
+        (p.current_revenue-p.previous_revenue)/NULLIF(p.previous_revenue,0) AS sales_growth
+      FROM periods p JOIN sales.salesterritory t ON t.territoryid=p.territoryid
+      WHERE p.current_count>0 AND p.previous_count>0
+      ORDER BY p.territoryid LIMIT 100

@@ -1,0 +1,12 @@
+# This machine's Windows PostgreSQL owns host port 5432.
+# Join the already-existing warehouse network; do not create a warehouse service.
+services:
+  backend:
+    environment:
+      WAREHOUSE_HOST: ${WAREHOUSE_DOCKER_HOST:-adventureworks-for-postgres-db-1}
+    networks:
+      - warehouse_existing
+networks:
+  warehouse_existing:
+    external: true
+    name: ${WAREHOUSE_DOCKER_NETWORK:-adventureworks-for-postgres_default}

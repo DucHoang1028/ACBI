@@ -1,0 +1,185 @@
+schemaVersion: 1
+status: approved
+dataSources:
+- sourceId: adventureworks
+  name: AdventureWorks 2014 OLTP PostgreSQL port
+  database: Adventureworks
+  schemas:
+  - humanresources
+  - person
+  - production
+  - purchasing
+  - sales
+  - acbi_demo
+  connectionRole: acbi_ro
+  credentials: environment only
+businessMetrics:
+- metricId: production_output
+  name: Production output
+  domain: production
+  description: Production output; approved definition
+  supportedDimensions:
+  - date
+  - product
+  - product_category
+  - production_line
+  - factory
+  definitions:
+  - version: 1
+    formula: SUM(orderqty - scrappedqty)
+    unit: units
+    approvalStatus: approved
+    effectiveFrom: '2026-09-19'
+    dateColumn: production.workorder.enddate
+    dataMappingIds:
+    - production_fact
+    emptySetPolicy: no_data; do not coalesce absence to zero
+- metricId: defect_rate
+  name: Defect rate
+  domain: quality
+  description: Defect rate; approved definition
+  supportedDimensions:
+  - date
+  - product
+  - product_category
+  - production_line
+  - factory
+  - scrap_reason
+  definitions:
+  - version: 1
+    formula: SUM(scrappedqty)::numeric / NULLIF(SUM(orderqty),0)
+    unit: ratio
+    approvalStatus: approved
+    effectiveFrom: '2026-09-19'
+    dateColumn: production.workorder.enddate
+    dataMappingIds:
+    - production_fact
+    emptySetPolicy: no_data; do not coalesce absence to zero
+- metricId: revenue
+  name: Revenue
+  domain: sales
+  description: Revenue; approved definition
+  supportedDimensions:
+  - date
+  - sales_territory
+  - product
+  - product_category
+  definitions:
+  - version: 1
+    formula: SUM(sales.salesorderheader.subtotal)
+    unit: source_currency
+    approvalStatus: approved
+    effectiveFrom: '2026-09-19'
+    dateColumn: sales.salesorderheader.orderdate
+    dataMappingIds:
+    - sales_fact
+    emptySetPolicy: no_data; do not coalesce absence to zero
+- metricId: sales_growth
+  name: Sales growth
+  domain: sales
+  description: Sales growth; approved definition
+  supportedDimensions:
+  - date
+  - sales_territory
+  definitions:
+  - version: 1
+    formula: (current_revenue-previous_revenue)/NULLIF(previous_revenue,0)
+    unit: ratio
+    approvalStatus: approved
+    effectiveFrom: '2026-09-19'
+    dateColumn: sales.salesorderheader.orderdate
+    dataMappingIds:
+    - sales_fact
+    emptySetPolicy: no_data; do not coalesce absence to zero
+dimensions:
+- dimensionId: date
+  name: Date
+  description: Metric-specific orderdate/enddate; half-open intervals
+  approvalStatus: approved
+- dimensionId: product
+  name: Product
+  description: production.product.productid; workorder.productid
+  approvalStatus: approved
+- dimensionId: product_category
+  name: Product category
+  description: product.productsubcategoryid -> productsubcategory.productcategoryid -> productcategory
+  approvalStatus: approved
+- dimensionId: sales_territory
+  name: Sales territory
+  description: sales.salesorderheader.territoryid -> sales.salesterritory.territoryid
+  approvalStatus: approved
+- dimensionId: production_line
+  name: Production line
+  description: production.location; terminal routing operation only; unrouted is unassigned
+  approvalStatus: approved
+- dimensionId: factory
+  name: Factory
+  description: Synthetic acbi_demo.location_factory -> acbi_demo.factory; not supported for revenue
+  approvalStatus: approved
+- dimensionId: scrap_reason
+  name: Scrap reason
+  description: production.workorder.scrapreasonid -> production.scrapreason; NULL displayed as Unspecified
+  approvalStatus: approved
+dataMappings:
+- mappingId: production_fact
+  sourceId: adventureworks
+  approvalStatus: approved
+  tableOrView: production.workorder
+  columnReferences:
+  - workorderid
+  - productid
+  - orderqty
+  - scrappedqty
+  - enddate
+  - scrapreasonid
+  joinRules:
+  - One workorder row is one fact. stockedqty is absent in this port; derive orderqty-scrappedqty.
+  - Choose greatest operationsequence once per workorder, then location_factory on locationid.
+  - Unrouted workorders have NULL line and factory; managers see Unassigned, production_a never sees unassigned.
+  - Product/category joins are many-to-one; preserve unknown categories with LEFT JOIN.
+  - Reason-level defect rate uses order quantity of workorders with that reason, not the global denominator.
+  referenceFactSQL: |
+    WITH terminal AS (
+     SELECT DISTINCT ON (workorderid) workorderid, locationid
+     FROM production.workorderrouting
+     ORDER BY workorderid, operationsequence DESC, locationid
+    ), fact AS (
+     SELECT w.*, (w.orderqty-w.scrappedqty) AS stockedqty,
+            t.locationid, lf.factory_id
+     FROM production.workorder w
+     LEFT JOIN terminal t ON t.workorderid=w.workorderid
+     LEFT JOIN acbi_demo.location_factory lf ON lf.locationid=t.locationid
+    )
+- mappingId: sales_fact
+  sourceId: adventureworks
+  approvalStatus: approved
+  tableOrView: sales.salesorderheader
+  columnReferences:
+  - salesorderid
+  - orderdate
+  - territoryid
+  - subtotal
+  joinRules:
+  - SUM(header.subtotal) at order grain; excludes tax and freight. Never sum header subtotal after an
+    unaggregated detail join.
+  - Territory is many-to-one. No approved relationship exists between sales and synthetic factories.
+  - 'For product/category only: allocate each header subtotal proportionally to detail orderqty*unitprice*(1-unitpricediscount)
+    divided by the order detail total. If any denominator is zero, return a limitation; never silently
+    drop the order.'
+  - Source currency is not certified as USD or VND; no currency conversion is inferred.
+datePolicy:
+  anchor: DATA_AS_OF or MAX(sales.salesorderheader.orderdate)::date
+  validateAgainst: MIN/MAX sales order dates at startup
+  intervals: start inclusive, end exclusive
+  currentPeriods: period start through DATA_AS_OF inclusive
+  previousPeriods: last_month/last_quarter mean complete previous calendar period
+  recently: requires clarification unless conversation already specifies a period
+  timezone: source dates are timestamp without time zone; treat as date, do not shift timezone
+  savedResults: persist data_as_of, anchor_source, resolved start/end, retrieved_at and metric_versions
+approvalNotes:
+- Derived stocked quantity needs approval.
+- Terminal-operation factory attribution needs approval; Factory C has locations but no terminal workorders
+  in this dataset.
+- Product revenue allocation needs approval.
+- Approved by the project owner on 2026-09-19 after reviewing the Phase 0 report and assumptions.
+- Approval enables the dictionary; runtime business queries are added in later phases.

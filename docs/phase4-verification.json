@@ -1,0 +1,20 @@
+{
+  "checked_at": "2026-09-20T02:50:59.682207+00:00",
+  "model": "FakeLLM",
+  "saved_result_traceable": true,
+  "cross_user_result_denied": true,
+  "no_data_not_zero": true,
+  "storage_failure_partial": true,
+  "voice_transcript_review": true,
+  "admin_role_boundary": true,
+  "admin_user_management": true,
+  "qs7_seconds": [
+    0.034,
+    0.036,
+    0.042,
+    0.045,
+    0.048
+  ],
+  "qs7_p95_seconds": 0.048,
+  "qs8_controlled_failures": true
+}

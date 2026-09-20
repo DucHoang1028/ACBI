@@ -1,0 +1,374 @@
+"""Authenticate, interpret, authorize, route, validate, execute and present."""
+
+import logging
+from dataclasses import replace
+from datetime import date, datetime, timezone
+from decimal import Decimal
+from typing import Any
+from uuid import uuid4
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field, ValidationError
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.ai.budget import RequestBudget
+from app.ai.client import FakeLLM, Intent
+from app.api.auth import current_user
+from app.chat.service import audit, get_context, save_context
+from app.history.service import save as save_result
+from app.presentation.charts import TABLE, describe, validate_viz
+from app.presentation.summary import factual, numbers_match
+from app.query.builder import authorize, build, prepare, supports
+from app.query.validation import (
+    SQLCorrectionError,
+    SQLPolicyError,
+    ValidatedQuery,
+    validate,
+)
+
+router = APIRouter(prefix="/api")
+logger = logging.getLogger("acbi.chat")
+
+
+class AskRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=1000)
+    conversation_id: str | None = None
+
+
+def merged_intent(intent: Intent, prior: dict[str, Any] | None) -> Intent:
+    if not prior:
+        return intent
+    slots = dict(prior.get("slots") or {})
+    current = intent.model_dump()
+    for field in ("metric_id", "period", "factory_id", "territory"):
+        if current[field] is None:
+            current[field] = slots.get(field)
+    if current["dimension"] == "none" and slots.get("dimension") not in (None, "none"):
+        current["dimension"] = slots["dimension"]
+    if current["period"] == "explicit":
+        for field in ("start_date", "end_date"):
+            if current[field] is None:
+                current[field] = slots.get(field)
+    return Intent.model_validate(current)
+
+
+def run_query(
+    engine: Any, plan: ValidatedQuery, budget: RequestBudget
+) -> list[dict[str, Any]]:
+    if not isinstance(plan, ValidatedQuery):
+        raise SQLPolicyError("Query must pass the shared validator")
+    with engine.connect() as connection, connection.begin():
+        connection.execute(text("SET TRANSACTION READ ONLY"))
+        connection.execute(
+            text("SELECT set_config('statement_timeout', :timeout, true)"),
+            {"timeout": str(max(1, min(15000, int(budget.remaining() * 1000))))},
+        )
+        rows = [
+            dict(r) for r in connection.execute(text(plan.sql), plan.params).mappings()
+        ]
+    if any(r.get("invalid_detail_count", 0) for r in rows):
+        raise ValueError("Product revenue cannot be allocated: zero detail denominator")
+    budget.remaining()
+    for row in rows:
+        row.pop("invalid_detail_count", None)
+        for key, value in row.items():
+            if isinstance(value, (Decimal, date, datetime)):
+                row[key] = str(value)
+    return rows
+
+
+def check_definition(intent: Intent, dictionary: dict[str, Any]) -> None:
+    metric = next(
+        (m for m in dictionary["businessMetrics"] if m["metricId"] == intent.metric_id),
+        None,
+    )
+    if not metric:
+        raise ValueError("Choose an approved metric")
+    approved = [d for d in metric["definitions"] if d["approvalStatus"] == "approved"]
+    if not approved or max(d["version"] for d in approved) != 1:
+        raise ValueError("This metric definition needs a verified query mapping")
+    if intent.metric_id == "sales_growth" and intent.dimension not in {
+        "none",
+        "sales_territory",
+    }:
+        raise ValueError("Growth alignment for this dimension is not approved")
+    dimension = (
+        "date" if intent.dimension in {"day", "week", "month"} else intent.dimension
+    )
+    if dimension != "none" and dimension not in metric["supportedDimensions"]:
+        raise ValueError("This dimension is not defined for the selected metric")
+    if intent.factory_id not in (None, 1, 2, 3):
+        raise ValueError("Choose Factory A, B or C")
+    if intent.zero_scrap_only and (
+        intent.metric_id != "defect_rate" or intent.dimension != "product"
+    ):
+        raise ValueError("Zero-scrap filtering requires defect rate by product")
+
+
+def route_query(
+    question: str,
+    intent: Intent,
+    role: str,
+    anchor: date,
+    state: Any,
+    budget: RequestBudget,
+) -> tuple[ValidatedQuery, str, list[str]]:
+    if supports(intent):
+        template = build(intent, role, anchor)
+        return (
+            validate(template, intent, role, trusted_template=True),
+            "structured_intent",
+            [],
+        )
+    if not state.settings.external_metadata_enabled and not isinstance(
+        state.llm, FakeLLM
+    ):
+        raise ValueError("External metadata use needs approval")
+    base = prepare(intent, role, anchor)
+    references = state.retriever.retrieve(question, role, base.metric_id)
+    if not references:
+        raise ValueError("Approved metadata is insufficient for this request")
+    error = None
+    for attempt in range(state.settings.llm_max_regenerations + 1):
+        candidate = state.llm.sql_candidate(question, intent, references, error, budget)
+        if candidate.missing_information or not candidate.sql:
+            raise ValueError(
+                candidate.missing_information or "More information is required"
+            )
+        try:
+            plan = validate(
+                replace(base, sql=candidate.sql), intent, role, generated=True
+            )
+            return plan, "rag_text_to_sql", [r["id"] for r in references]
+        except SQLCorrectionError:
+            if attempt >= state.settings.llm_max_regenerations:
+                raise RuntimeError("SQL correction limit reached")
+            error = "Invalid PostgreSQL syntax. Return one SELECT statement."
+    raise RuntimeError("No valid SQL candidate")
+
+
+def chart(
+    question: str, rows: list[dict[str, Any]], state: Any, budget: RequestBudget
+) -> tuple[dict[str, Any], bool]:
+    if not state.settings.external_metadata_enabled and not isinstance(
+        state.llm, FakeLLM
+    ):
+        return TABLE.model_dump(), True
+    error = None
+    for _ in range(state.settings.llm_max_regenerations + 1):
+        try:
+            proposal = state.llm.visualize(question, describe(rows), error, budget)
+            return validate_viz(proposal, rows).model_dump(), False
+        except (ValueError, ValidationError) as invalid:
+            error = str(invalid)[:180]
+        except (httpx.HTTPError, RuntimeError, KeyError, TypeError):
+            break
+    return TABLE.model_dump(), True
+
+
+def answer(
+    body: AskRequest,
+    user: dict[str, Any],
+    request: Request,
+) -> tuple[int, dict[str, Any]]:
+    request_id = str(uuid4())
+    conversation_id = body.conversation_id or str(uuid4())
+    storage = request.app.state.storage
+    settings = request.app.state.settings
+    budget = RequestBudget(
+        settings.request_timeout_seconds, settings.llm_max_calls_per_request
+    )
+    metric_id: str | None = None
+    outcome = "technical_failure"
+    query_path: str | None = None
+    try:
+        if body.conversation_id:
+            prior = get_context(storage, conversation_id, user["id"])
+            if prior is None:
+                raise HTTPException(status_code=404, detail="Conversation not found")
+        else:
+            prior = None
+        if user["role"] == "it_admin":
+            outcome = "denied"
+            return 403, response(
+                outcome,
+                "Business data is outside your scope",
+                request_id,
+                conversation_id,
+            )
+        client = request.app.state.llm
+        if client is None:
+            return 503, response(
+                "technical_failure",
+                "Groq API key is not configured",
+                request_id,
+                conversation_id,
+            )
+        raw = client.interpret(body.question, prior["slots"] if prior else None, budget)
+        intent = merged_intent(raw, prior)
+        metric_id = intent.metric_id
+        if metric_id:
+            try:
+                authorize(intent, user["role"])
+            except PermissionError:
+                outcome = "denied"
+                return 403, response(
+                    outcome,
+                    "Data is outside your access scope",
+                    request_id,
+                    conversation_id,
+                )
+            except ValueError as error:
+                outcome = "needs_clarification"
+                question = str(error)
+                save_context(
+                    storage, conversation_id, user["id"], intent.model_dump(), question
+                )
+                return 200, response(outcome, question, request_id, conversation_id)
+        if (
+            intent.needs_clarification
+            or not intent.metric_id
+            or not intent.period
+            or intent.period == "recently"
+        ):
+            outcome = "needs_clarification"
+            question = (
+                intent.clarification_question
+                or "Which metric and reporting period do you mean?"
+            )
+            save_context(
+                storage, conversation_id, user["id"], intent.model_dump(), question
+            )
+            return 200, response(outcome, question, request_id, conversation_id)
+        anchor = date.fromisoformat(request.app.state.readiness["data_as_of"])
+        try:
+            check_definition(intent, request.app.state.dictionary)
+            plan, query_path, references = route_query(
+                body.question, intent, user["role"], anchor, request.app.state, budget
+            )
+        except PermissionError:
+            outcome = "denied"
+            return 403, response(
+                outcome,
+                "Data is outside your access scope",
+                request_id,
+                conversation_id,
+            )
+        except ValueError as error:
+            outcome = "needs_clarification"
+            question = str(error)
+            save_context(
+                storage, conversation_id, user["id"], intent.model_dump(), question
+            )
+            return 200, response(outcome, question, request_id, conversation_id)
+        rows = run_query(request.app.state.warehouse, plan, budget)
+        outcome = "ok" if rows else "no_data"
+        save_context(storage, conversation_id, user["id"], intent.model_dump(), None)
+        result = response(
+            outcome,
+            "Results found" if rows else "No data for this period",
+            request_id,
+            conversation_id,
+        )
+        result.update(
+            table=rows,
+            query_path=query_path,
+            answer_text=(factual(plan.metric_id, rows, plan.start, plan.end)),
+            sources={
+                "source": "Adventureworks",
+                "sql": plan.sql,
+                "parameters": {
+                    k: str(v) if isinstance(v, date) else v
+                    for k, v in plan.params.items()
+                },
+                "retrieved_at": datetime.now(timezone.utc).isoformat(),
+                "metric_versions": {plan.metric_id: plan.version},
+                "data_as_of": anchor.isoformat(),
+                "anchor_source": request.app.state.readiness["anchor_source"],
+                "references": references,
+            },
+        )
+        if rows:
+            result["viz_config"], result["chart_fallback"] = chart(
+                body.question, rows, request.app.state, budget
+            )
+            if settings.send_results_to_llm and settings.external_results_enabled:
+                try:
+                    proposed = client.summarize(body.question, rows, budget)
+                    if numbers_match(proposed, rows):
+                        result["answer_text"] = proposed
+                except (httpx.HTTPError, RuntimeError, ValueError, KeyError):
+                    logger.warning("Request %s summary fell back", request_id)
+        result["llm_calls"] = budget.calls
+        try:
+            result["result_id"] = save_result(
+                storage,
+                user["id"],
+                body.question,
+                plan.metric_id,
+                authorize(intent, user["role"]),
+                result,
+            )
+            result["saved"] = True
+        except SQLAlchemyError:
+            logger.warning("Request %s result storage failed", request_id)
+            result["status"] = "partial"
+            result["message"] = "Answer ready, but saving failed"
+            result["saved"] = False
+        return 200, result
+    except HTTPException:
+        raise
+    except (
+        SQLAlchemyError,
+        httpx.HTTPError,
+        ValidationError,
+        RuntimeError,
+        ValueError,
+        KeyError,
+        TypeError,
+    ) as error:
+        logger.warning("Request %s failed: %s", request_id, type(error).__name__)
+        return 503, response(
+            "technical_failure",
+            "Question could not be processed",
+            request_id,
+            conversation_id,
+        )
+    finally:
+        logger.info(
+            "request_id=%s llm_calls=%d outcome=%s path=%s",
+            request_id,
+            budget.calls,
+            outcome,
+            query_path,
+        )
+        if outcome == "denied":
+            audit(storage, user["id"], request_id, outcome, metric_id)
+
+
+def response(
+    status: str, message: str, request_id: str, conversation_id: str
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "message": message,
+        "answer_text": None,
+        "table": [],
+        "viz_config": None,
+        "sources": None,
+        "request_id": request_id,
+        "conversation_id": conversation_id,
+        "saved": False,
+    }
+
+
+@router.post("/chat/ask")
+def ask(
+    body: AskRequest, request: Request, user: dict[str, Any] = Depends(current_user)
+) -> Any:
+    from fastapi.responses import JSONResponse
+
+    status_code, payload = answer(body, user, request)
+    return JSONResponse(status_code=status_code, content=payload)

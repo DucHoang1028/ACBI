@@ -1,0 +1,19 @@
+{$PUBLIC_HOST} {
+    encode gzip
+    handle /api/* {
+        reverse_proxy backend:8000
+    }
+    handle /openapi.json {
+        reverse_proxy backend:8000
+    }
+    handle {
+        root * /srv
+        try_files {path} /index.html
+        file_server
+    }
+}
+
+# Container health check; this listener is not published.
+:8081 {
+    respond /health "ok" 200
+}

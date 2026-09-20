@@ -1,0 +1,5 @@
+.result-chart,.kpi-card{margin:24px 0;padding:18px 8px;background:#f7fafb;border:1px solid #d8e4e9;border-radius:8px}
+.result-chart figcaption,.kpi-card figcaption{font-size:15px;font-weight:650;padding:0 12px 18px}
+.kpi-card{padding:24px}.kpi-card figcaption{padding:0 0 14px}.kpi-card strong{display:block;color:#176c80;font-size:clamp(24px,5vw,38px);overflow-wrap:anywhere}
+.result-chart .recharts-wrapper{font-size:12px}.result-chart .recharts-legend-wrapper{font-size:12px}
+@media(max-width:520px){.question{padding:16px}.result-chart{margin-left:-8px;margin-right:-8px;padding:12px 0}}

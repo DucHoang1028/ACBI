@@ -1,0 +1,14 @@
+.tools
+.git
+**/.env
+**/.env.*
+**/*.key
+**/*.pem
+**/*.dump
+**/*.backup
+deploy/certs
+deploy/seed-credentials.txt
+data/eval/results.local.json
+**/__pycache__
+**/node_modules
+frontend/dist
