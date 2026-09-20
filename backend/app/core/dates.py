@@ -24,10 +24,14 @@ def date_hints(question: str) -> dict[str, str | None]:
     if len(found) == 1 and not re.search(r"\b\d{4}\b", value):
         return {"period": found[0], "start_date": None, "end_date": None}
     # Anchor complete, single month/quarter references without interpreting ranges.
-    month = re.fullmatch(
-        r"\s*(?:thang\s+)(\d{1,2})\s*(?:nam\s+|/)(\d{4})[ .?!]*", value
-    )
-    quarter = re.fullmatch(r"\s*quy\s+([1-4])\s*(?:nam\s+|/)(\d{4})[ .?!]*", value)
+    # Exactly one month or quarter, stated with a year and not compared with another.
+    month_mentions = re.findall(r"\bthang\s*\d{1,2}\b", value)
+    quarter_mentions = re.findall(r"\bquy\s*[1-4]\b", value)
+    comparing = re.search(r"\b(?:so sanh|so voi|compare|vs)\b", value)
+    month = quarter = None
+    if not comparing and len(month_mentions) + len(quarter_mentions) == 1:
+        month = re.search(r"\bthang\s+(\d{1,2})\s*(?:nam\s+|/)(\d{4})\b", value)
+        quarter = re.search(r"\bquy\s+([1-4])\s*(?:nam\s+|/)(\d{4})\b", value)
     if month or quarter:
         match = month or quarter
         assert match is not None

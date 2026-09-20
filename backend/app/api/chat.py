@@ -55,6 +55,20 @@ def merged_intent(
     slots = dict((prior or {}).get("slots") or {})
     current = intent.model_dump()
     hints = intent_hints(question)
+    adds_information = bool(
+        hints
+        or intent.metric_id
+        or intent.period
+        or intent.dimension != "none"
+        or intent.territory
+        or intent.factory_id is not None
+        or intent.start_date
+        or intent.zero_scrap_only
+        or is_confirmation(question)
+    )
+    if not adds_information:
+        # Small talk or an unclear message must not replay the previous query.
+        return intent.model_copy(update={"needs_clarification": True})
     if not hints and is_confirmation(question):
         for turn in reversed((prior or {}).get("turns") or []):
             hints = intent_hints(turn.get("question", ""))
@@ -481,11 +495,13 @@ def clarification_text(intent: Intent, language: str) -> str:
     vi = language == "vi"
     if not intent.metric_id:
         return (
-            "Tôi chưa có định nghĩa đã phê duyệt cho chỉ số này. Bạn có thể hỏi "
-            "doanh thu, tăng trưởng doanh thu, sản lượng hoặc tỷ lệ phế phẩm."
+            "Tôi chưa xác định được chỉ số bạn muốn xem, hoặc chỉ số đó chưa có định "
+            "nghĩa được duyệt. Bạn có thể hỏi doanh thu, tăng trưởng doanh thu, "
+            "sản lượng hoặc tỷ lệ phế phẩm, kèm khoảng thời gian."
             if vi
-            else "This metric has no approved definition yet. Ask about revenue, "
-            "revenue growth, production output, or defect rate."
+            else "I could not tell which metric you want, or it has no approved "
+            "definition yet. Ask about revenue, revenue growth, production output "
+            "or defect rate, with a period."
         )
     if not intent.period or intent.period == "recently":
         return (

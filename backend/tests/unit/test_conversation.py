@@ -245,3 +245,29 @@ def test_local_intent_only_for_unambiguous_questions() -> None:
         "Có vấn đề gì không?",
     ):
         assert local_intent(text) is None, text
+
+
+def test_small_talk_does_not_replay_and_month_with_trailing_words() -> None:
+    from app.api.chat import merged_intent
+
+    prior = {
+        "slots": {"metric_id": "production_output", "period": "explicit"},
+        "turns": [],
+    }
+    blank = intent(metric_id=None, missing_fields=["metric_id"])
+    hello = merged_intent(blank, prior, "hello")
+    assert hello.metric_id is None and hello.needs_clarification
+    followup = merged_intent(blank, prior, "Còn quý trước?")
+    assert followup.metric_id == "production_output"
+
+    for text in ("tháng 5 năm 2025 đi", "Doanh thu tháng 5 năm 2025"):
+        hints = date_hints(text)
+        assert (hints["start_date"], hints["end_date"]) == (
+            "2025-05-01",
+            "2025-06-01",
+        ), text
+    # A comparison is never collapsed to one month.
+    from app.core.dates import intent_hints
+
+    pair = intent_hints("doanh thu tháng 5 so với tháng 4 năm 2025")
+    assert (pair["start_date"], pair["end_date"]) == ("2025-04-01", "2025-06-01")

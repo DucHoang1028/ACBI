@@ -4,7 +4,7 @@ type Source={data_as_of:string;sql:string;parameters:Record<string,unknown>;metr
 type Answer={status:string;message:string;answer_text:string|null;table:Record<string,unknown>[];viz_config?:VizConfig|null;chart_fallback?:boolean;sources:Source|null;conversation_id:string;saved?:boolean};
 type Saved={id:string;conversation_id:string;question:string;created_at:string};
 type Turn={question:string;answer:Answer|null};
-const labels:Record<string,string>={revenue:'Doanh thu',sales_growth:'Tăng trưởng doanh thu',production_output:'Sản lượng',defect_rate:'Tỷ lệ phế phẩm',territory:'Khu vực',sales_territory:'Khu vực',month:'Tháng',product:'Sản phẩm',factory:'Nhà máy',year:'Năm',orders:'Số đơn hàng',sample_count:'Số bản ghi',current_revenue:'Doanh thu kỳ này',previous_revenue:'Doanh thu kỳ trước'};
+const labels:Record<string,string>={revenue:'Doanh thu',sales_growth:'Tăng trưởng doanh thu',production_output:'Sản lượng',defect_rate:'Tỷ lệ phế phẩm',territory:'Khu vực',sales_territory:'Khu vực',month:'Tháng',product:'Sản phẩm',factory:'Nhà máy',production_line:'Dây chuyền',category:'Danh mục',reason:'Lý do phế phẩm',ordered_units:'Số lượng đặt',scrapped_units:'Số lượng phế phẩm',day:'Ngày',week:'Tuần',year:'Năm',orders:'Số đơn hàng',sample_count:'Số bản ghi',current_revenue:'Doanh thu kỳ này',previous_revenue:'Doanh thu kỳ trước'};
 export function Chat({access,enabled,advancedEnabled,anchor,language,role}:{access:string;enabled:boolean;advancedEnabled:boolean;anchor:string;language:'vi'|'en';role:string}){
   const vi=language==='vi';
   const [question,setQuestion]=useState('');
