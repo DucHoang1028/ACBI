@@ -17,24 +17,20 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.ai.budget import RequestBudget
 from app.ai.client import FakeLLM, Intent
-from app.conversation.glossary import (
-    asks_forecast,
-    asks_materials,
-    converse,
-    no_materials,
+from app.conversation.dialogue import fallback, reply_from_metadata
+from app.conversation.intent import (
+    clarification_text,
+    local_intent,
+    merged_intent,
+    validate_choices,
 )
-from app.conversation.intent import clarification_text, local_intent, merged_intent
 from app.conversation.service import get_context, next_turns, save_context
-from app.core.dates import (
-    METRIC_WORDS,
-    fold,
-    intent_hints,
-    is_share_question,
-    month_start,
-)
+from app.core.dates import is_share_question, metric_words, month_start
+from app.core.text import fold
 from app.history.service import audit, latest_in_conversation
 from app.history.service import save as save_result
-from app.presentation.analysis import METRIC_NAMES, analysis_kind, analyze
+from app.metadata import vocabulary
+from app.presentation.analysis import analysis_kind, analyze
 from app.presentation.charts import TABLE, VizConfig, validate_viz
 from app.presentation.contract import AskRequest, response
 from app.presentation.messages import Explained, friendly
@@ -52,12 +48,6 @@ from app.query.forecast import (
     contiguous,
     make_forecast,
     next_months,
-)
-from app.query.shortcuts import (
-    SPECIAL_ROLES,
-    special_domain,
-    special_kind,
-    special_response,
 )
 from app.query.validation import (
     SQLCorrectionError,
@@ -125,7 +115,8 @@ def check_definition(intent: Intent, dictionary: dict[str, Any]) -> None:
         )
         if series not in metric["supportedDimensions"]:
             raise ValueError("This dimension is not defined for the selected metric")
-    if intent.factory_id not in (None, 1, 2, 3):
+    known = set(vocabulary.get().ids("factory").values())
+    if intent.factory_id is not None and known and intent.factory_id not in known:
         raise ValueError("Choose Factory A, B or C")
     if intent.zero_scrap_only and (
         intent.metric_id != "defect_rate" or intent.dimension != "product"
@@ -220,24 +211,41 @@ def persist(
         result["saved"] = False
 
 
-def forecast_horizon(question: str, first: date) -> tuple[int, bool]:
-    """(months to forecast, whether the request was cut to the 12-month limit)."""
-    value = fold(question)
-    year = re.search(r"\b(20\d\d)\b", value)
-    if year and int(year.group(1)) >= first.year:
-        wanted = (int(year.group(1)) - first.year) * 12 + (13 - first.month)
-    elif re.search(r"\b(?:nam toi|nam sau|next year)\b", value):
-        wanted = 12
-    elif re.search(r"\b(?:quy toi|quy sau|next quarter)\b", value):
-        wanted = 3
-    elif re.search(r"\b(?:thang toi|thang sau|next month)\b", value):
-        wanted = 1
-    else:
-        wanted = 6
-    return min(max(wanted, 1), 12), wanted > 12
+def run_dialogue(
+    raw: Intent,
+    body: AskRequest,
+    user: dict[str, Any],
+    state: Any,
+    budget: RequestBudget,
+    anchor: date,
+    request_id: str,
+    conversation_id: str,
+    prior: dict[str, Any] | None,
+) -> tuple[str, dict[str, Any]]:
+    """Answer about the data itself, or decline what the system cannot serve."""
+    limitation = raw.intent_type == "unsupported"
+    mode = "limitation" if limitation else "answer"
+    text_out = reply_from_metadata(
+        state.llm, body.question, user["role"], mode, anchor.isoformat(), budget
+    ) or fallback(mode, body.language, user["role"])
+    status = "needs_clarification" if limitation else "ok"
+    save_context(
+        state.storage,
+        conversation_id,
+        user["id"],
+        (prior or {}).get("slots") or {},
+        None,
+        next_turns(prior, body.question, text_out),
+    )
+    result = response(
+        status, text_out if limitation else "Results found", request_id, conversation_id
+    )
+    result.update(answer_text=None if limitation else text_out, llm_calls=budget.calls)
+    return status, result
 
 
 def run_forecast(
+    raw: Intent,
     body: AskRequest,
     user: dict[str, Any],
     state: Any,
@@ -249,8 +257,15 @@ def run_forecast(
 ) -> tuple[int, dict[str, Any]]:
     """Trend forecast of revenue or output from complete recorded months."""
     storage, settings, vi = state.storage, state.settings, body.language == "vi"
-    hints = intent_hints(body.question)
-    metric = str(hints.get("metric_id") or "")
+    checked = validate_choices(raw, body.question)
+    if checked.missing_fields:
+        return 200, response(
+            "needs_clarification",
+            clarification_text(checked, body.language),
+            request_id,
+            conversation_id,
+        )
+    metric = raw.metric_id or ""
     if metric not in {"revenue", "production_output"}:
         text_out = (
             "Tôi chỉ dự báo được doanh thu hoặc sản lượng (các tỷ lệ không cộng dồn "
@@ -267,7 +282,6 @@ def run_forecast(
         anchor + timedelta(days=1) if anchor.day == last_day else anchor.replace(day=1)
     )
     start = month_start(end, -36)  # only complete months are history
-    letter = re.search(r"\b(?:nha may|factory)\s*([abc])\b", fold(body.question))
     intent = Intent.model_validate(
         {
             "metric_id": metric,
@@ -275,8 +289,8 @@ def run_forecast(
             "period": "explicit",
             "start_date": start.isoformat(),
             "end_date": end.isoformat(),
-            "factory_id": "abc".index(letter.group(1)) + 1 if letter else None,
-            "territory": hints.get("territory") if metric == "revenue" else None,
+            "factory_id": checked.factory_id,
+            "territory": checked.territory if metric == "revenue" else None,
             "limit": 100,
             "needs_clarification": False,
             "clarification_question": None,
@@ -304,7 +318,8 @@ def run_forecast(
     rows = run_query(state.warehouse, plan, budget)
     months = [str(r["month"]) for r in rows]
     series = [float(r[metric]) for r in rows]
-    horizon, capped = forecast_horizon(body.question, end)
+    wanted = raw.horizon_months or 6
+    horizon, capped = min(wanted, 12), wanted > 12
     try:
         if not contiguous(months):
             raise ForecastRefused("gaps")
@@ -370,7 +385,7 @@ def run_forecast(
     viz = validate_viz(
         VizConfig(type="line", x="month", y=["actual", "forecast"], series=None), table
     )
-    name = METRIC_NAMES[metric][0 if vi else 1]
+    name = vocabulary.get().metric_label(metric, body.language).lower()
     total = sum(result.values)
     first_m, last_m = future[0], future[-1]
     trend = (
@@ -496,60 +511,9 @@ def answer(
                 conversation_id,
             )
         anchor = date.fromisoformat(state.readiness["data_as_of"])
-        talk = converse(body.question, body.language, state.dictionary)
-        if talk:
-            # Small talk and "what is X" are answered from fixed vocabulary.
-            save_context(
-                storage,
-                conversation_id,
-                user["id"],
-                (prior or {}).get("slots") or {},
-                None,
-                next_turns(prior, body.question, talk),
-            )
-            result = response("ok", "Results found", request_id, conversation_id)
-            result.update(answer_text=talk, llm_calls=0)
-            outcome = "ok"
-            return 200, result
-        if asks_materials(body.question):
-            reply = no_materials(body.language)
-            outcome = "needs_clarification"
-            save_context(
-                storage,
-                conversation_id,
-                user["id"],
-                (prior or {}).get("slots") or {},
-                None,
-                next_turns(prior, body.question, reply),
-            )
-            return 200, response(outcome, reply, request_id, conversation_id)
-        if asks_forecast(body.question):
-            # A forecast is computed here from recorded months, labelled as such,
-            # and refused when the history cannot support it.
-            try:
-                status_code, result = run_forecast(
-                    body,
-                    user,
-                    state,
-                    budget,
-                    anchor,
-                    request_id,
-                    conversation_id,
-                    prior,
-                )
-            except PermissionError:
-                outcome = "denied"
-                return 403, response(
-                    outcome,
-                    "Data is outside your access scope",
-                    request_id,
-                    conversation_id,
-                )
-            outcome = result["status"]
-            return status_code, result
         target = reshape_kind(body.question)
         follow = None if target else analysis_kind(body.question)
-        if follow and not re.search(METRIC_WORDS, fold(body.question)):
+        if follow and not re.search(metric_words(), fold(body.question)):
             latest = latest_in_conversation(
                 storage, user["id"], conversation_id, user["role"]
             )
@@ -558,7 +522,7 @@ def answer(
                 analyze(follow, previous["table"], latest["metric_id"], body.language)
                 if latest
                 and previous.get("table")
-                and latest["metric_id"] in METRIC_NAMES
+                and latest["metric_id"] in vocabulary.get().metrics
                 else None
             )
             if text_answer and latest:
@@ -634,47 +598,6 @@ def answer(
             )
             outcome = result["status"]
             return 200, result
-        kind = special_kind(body.question)
-        if kind:
-            if user["role"] not in SPECIAL_ROLES[kind]:
-                outcome = "denied"
-                return 403, response(
-                    outcome,
-                    "Data is outside your access scope",
-                    request_id,
-                    conversation_id,
-                )
-            result = special_response(
-                kind,
-                state.warehouse,
-                user["role"],
-                body.language,
-                anchor,
-                state.readiness["anchor_source"],
-                request_id,
-                conversation_id,
-            )
-            pending = result["message"] if kind == "factory_revenue" else None
-            save_context(
-                storage,
-                conversation_id,
-                user["id"],
-                (prior or {}).get("slots") or {},
-                pending,
-                next_turns(prior, body.question, pending),
-            )
-            if result["status"] == "ok":
-                persist(
-                    storage,
-                    user["id"],
-                    body.question,
-                    f"list:{kind}",
-                    1 if user["role"] == "production" else None,
-                    result,
-                    special_domain(kind, user["role"]),
-                )
-            outcome = result["status"]
-            return 200, result
         context = {
             "data_as_of": anchor.isoformat(),
             "slots": prior["slots"] if prior else {},
@@ -684,7 +607,61 @@ def answer(
         raw = (
             local_intent(body.question) if settings.local_intent_enabled else None
         ) or client.interpret(body.question, context, budget)
+        if raw.intent_type in {"chat", "metadata", "unsupported"}:
+            outcome, result = run_dialogue(
+                raw,
+                body,
+                user,
+                state,
+                budget,
+                anchor,
+                request_id,
+                conversation_id,
+                prior,
+            )
+            return 200, result
+        if raw.intent_type == "forecast":
+            try:
+                status_code, result = run_forecast(
+                    raw,
+                    body,
+                    user,
+                    state,
+                    budget,
+                    anchor,
+                    request_id,
+                    conversation_id,
+                    prior,
+                )
+            except PermissionError:
+                outcome = "denied"
+                return 403, response(
+                    outcome,
+                    "Data is outside your access scope",
+                    request_id,
+                    conversation_id,
+                )
+            outcome = result["status"]
+            return status_code, result
         intent = merged_intent(raw, prior, body.question)
+        if (
+            intent.dimension == "none"
+            and intent.series_dimension == "none"
+            and vocabulary.get().unrecognised_breakdown(fold(body.question))
+        ):
+            # A "by X" the dictionary does not know: never answer as if it were absent.
+            outcome, result = run_dialogue(
+                intent.model_copy(update={"intent_type": "unsupported"}),
+                body,
+                user,
+                state,
+                budget,
+                anchor,
+                request_id,
+                conversation_id,
+                prior,
+            )
+            return 200, result
         metric_id = intent.metric_id
         share_of: list[str] | None = None
         if intent.territory and is_share_question(body.question):

@@ -8,21 +8,10 @@ import re
 from decimal import Decimal
 from typing import Any
 
-from app.core.dates import fold
+from app.core.text import fold
+from app.metadata import vocabulary
 from app.presentation.charts import describe, number
 
-METRIC_NAMES = {
-    "revenue": ("doanh thu", "revenue"),
-    "sales_growth": ("tăng trưởng doanh thu", "sales growth"),
-    "production_output": ("sản lượng", "production output"),
-    "defect_rate": ("tỷ lệ phế phẩm", "defect rate"),
-    "on_time_rate": ("tỷ lệ hoàn thành đúng hạn", "on-time completion rate"),
-}
-RATES = {
-    "defect_rate",
-    "sales_growth",
-    "on_time_rate",
-}  # ratios do not add up across groups
 HIDDEN = {"sample_count", "ordered_units", "scrapped_units"}
 
 WHICH = r"\b(?:cai nao|ben nao|nuoc nao|khu vuc nao|thang nao|nam nao|nhom nao|which)\b"
@@ -71,7 +60,7 @@ def money(value: Decimal, language: str, decimals: int = 2) -> str:
 
 
 def amount(value: Decimal, metric: str, language: str) -> str:
-    if metric in RATES:
+    if metric in vocabulary.get().ratio_metrics():
         return percent(value * 100, language)
     return money(value, language)
 
@@ -118,7 +107,7 @@ def analyze(
         return None
     label, value = cols
     pairs = ranked(rows, label, value)
-    name = METRIC_NAMES.get(metric, (value, value))[0 if vi else 1]
+    name = vocabulary.get().metric_label(metric, language).lower()
     if len(pairs) < 2:
         return (
             "Kết quả trước chỉ có một giá trị nên chưa có gì để so sánh."
@@ -184,7 +173,7 @@ def analyze(
             f"{amount(gap, metric, language)}"
             + (f", {rel} above the lower value." if rel else ".")
         )
-    if metric in RATES:
+    if metric in vocabulary.get().ratio_metrics():
         return (
             f"{name.capitalize()} là một tỷ lệ nên không cộng dồn hay chia phần "
             f"được giữa các nhóm; cao nhất là {show(top)}, thấp nhất là {show(bottom)}."
@@ -246,7 +235,7 @@ def highlights(metric: str, rows: list[dict[str, Any]], language: str) -> str | 
     pairs = ranked(rows, label, value)
     if len(pairs) < 2:
         return None
-    name = METRIC_NAMES.get(metric, (value, value))[0 if vi else 1]
+    name = vocabulary.get().metric_label(metric, language).lower()
     top, bottom = pairs[0], pairs[-1]
 
     def show(pair: tuple[str, Decimal]) -> str:
@@ -291,7 +280,7 @@ def highlights(metric: str, rows: list[dict[str, Any]], language: str) -> str | 
                 f"{label_text(label, last[0], language)}, {name} {word[1]} "
                 f"{percent(abs(change), language)}."
             )
-    elif metric not in RATES:
+    elif metric not in vocabulary.get().ratio_metrics():
         total = sum((p[1] for p in pairs), Decimal(0))
         if total > 0:
             text += (

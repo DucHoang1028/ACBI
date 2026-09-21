@@ -92,12 +92,22 @@ def check_edge(item: dict[str, Any], body: dict[str, Any], anchor: date) -> list
     if body["status"] not in item["expect"]:
         problems.append(f"status {body['status']} not in {item['expect']}")
         return problems
+    said = f"{body.get('answer_text') or ''} {body.get('message') or ''}"
+    if item.get("says") and item["says"].lower() not in said.lower():
+        problems.append(f"answer lacks {item['says']!r}: {said[:200]}")
+    if item.get("avoid") and item["avoid"].lower() in said.lower():
+        problems.append(f"answer must not mention {item['avoid']!r}: {said[:200]}")
     if body["status"] != "ok":
         if body["status"] == "denied" and body.get("table"):
             problems.append("denied response carried data")
         return problems
-    if item.get("says") and item["says"] not in (body.get("answer_text") or ""):
-        problems.append(f"answer lacks {item['says']!r}: {body.get('answer_text')}")
+    said = f"{body.get('answer_text') or ''} {body.get('message') or ''}"
+    if item.get("says") and item["says"].lower() not in said.lower():
+        problems.append(f"answer lacks {item['says']!r}: {said[:200]}")
+    if item.get("avoid") and item["avoid"].lower() in said.lower():
+        problems.append(f"answer must not mention {item['avoid']!r}: {said[:200]}")
+    if "Traceback" in said or "Specify both" in said:
+        problems.append(f"internal text leaked: {said[:200]}")
     sources = body.get("sources") or {}
     if item.get("metric") and item["metric"] not in (
         sources.get("metric_versions") or {}

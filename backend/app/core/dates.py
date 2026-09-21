@@ -4,6 +4,9 @@ import re
 import unicodedata
 from datetime import date, timedelta
 
+from app.core.text import fold
+from app.metadata import vocabulary
+
 
 def date_hints(question: str) -> dict[str, str | None]:
     """Resolve only unambiguous calendar wording; leave comparisons to the model."""
@@ -68,130 +71,54 @@ def date_hints(question: str) -> dict[str, str | None]:
     return {}
 
 
-TERRITORIES = {
-    "Canada": "canada",
-    "Northwest": "northwest",
-    "Northeast": "northeast",
-    "Central": "central",
-    "Southwest": "southwest",
-    "Southeast": "southeast",
-    "France": "france|phap",
-    "Germany": "germany|duc",
-    "Australia": "australia|uc",
-    # Bare "anh" (a common word) counts only when it clearly lists a country.
-    "United Kingdom": (
-        "united kingdom|vuong quoc anh|nuoc anh|uk|(?<=va )anh|(?<=, )anh|anh(?= va )"
-    ),
-}
 SHARE = r"phan tram|chiem bao nhieu|ty trong|share|percent"
-
-
 STACK = r"\b(?:xep chong|cot chong|stacked)\b"
-DIMENSION_WORDS = {
-    "month": r"(?:theo|moi|hang|tung) thang|by month|monthly",
-    "sales_territory": r"khu vuc|territor(?:y|ies)|regions?",
-    "product_category": r"danh muc|nhom san pham|loai san pham|categor(?:y|ies)",
-    "production_line": r"day chuyen|production lines?",
-    "factory": r"nha may|factory|factories",
-}
+GROWTH = (
+    r"\b(?:tang truong|growth|(?:tang|giam) bao nhieu"
+    r"|so voi (?:thang|quy|ky) (?:lien )?truoc)\b"
+)
+
+
+def metric_words() -> str:
+    """Regex for any approved metric name or synonym, from the dictionary."""
+    return vocabulary.get().metric_words()
 
 
 def stacked_dimensions(value: str) -> tuple[str, str] | None:
     """Two breakdowns named in order, e.g. 'by month and territory'."""
-    found = sorted(
-        (match.start(), name)
-        for name, pattern in DIMENSION_WORDS.items()
-        if (match := re.search(rf"\b(?:{pattern})\b", value))
-    )
-    if len(found) < 2:
+    named = vocabulary.get().match_dimensions(value)
+    if len(named) < 2:
         return None
-    first, second = found[0][1], found[1][1]
+    first, second = named[0], named[1]
     return (second, first) if second == "month" else (first, second)
 
 
-METRIC_WORDS = (
-    r"(?<![\w.])(?:doanh thu|doanh so|revenue|sales|san luong|ty le|phe pham|"
-    r"scrap|defect|loi nhuan|profit|tang truong|growth|bao nhieu tien)(?![\w.])"
-)
-
-
 def territory_names(value: str) -> list[str] | None:
-    """Canonical territory names found in free text; None when some word is unknown."""
-    # In a model-supplied territory field a lone "Anh" means the United Kingdom.
-    folded = re.sub(r"\banh\b", "united kingdom", fold(value))
-    names = [
-        name
-        for name, pattern in TERRITORIES.items()
-        if re.search(rf"\b(?:{pattern})\b", folded)
-    ]
-    for pattern in TERRITORIES.values():
-        folded = re.sub(rf"\b(?:{pattern})\b", " ", folded)
-    leftover = re.sub(r"\b(?:va|and|voi|,|&)\b|[|,&]", " ", folded).split()
-    return names if names and not leftover else None
-
-
-def fold(question: str) -> str:
-    """Lowercase, accent-free text for keyword matching."""
-    return "".join(
-        c
-        for c in unicodedata.normalize("NFD", question.lower())
-        if unicodedata.category(c) != "Mn"
-    ).replace("đ", "d")
+    """Canonical territories in free text; None when some word is unknown."""
+    return vocabulary.get().member_names(fold(value), "sales_territory")
 
 
 def single_dimension(value: str) -> str | None:
     """'none' when no breakdown is named, the name when one is, None if unclear."""
-    words = {
-        **DIMENSION_WORDS,
-        "product": r"san pham|product",
-        "scrap_reason": r"ly do|scrap reason",
-    }
-    found = {
-        name
-        for name, pattern in words.items()
-        if re.search(rf"\b(?:{pattern})\b", value)
-    }
-    if "product_category" in found:
-        found.discard("product")
-    if len(found) > 1:
-        return None
-    return next(iter(found), "none")
+    named = vocabulary.get().match_dimensions(value)
+    return "none" if not named else named[0] if len(named) == 1 else None
 
 
 def is_share_question(question: str) -> bool:
-    value = "".join(
-        c
-        for c in unicodedata.normalize("NFD", question.lower())
-        if unicodedata.category(c) != "Mn"
-    ).replace("đ", "d")
-    return bool(re.search(rf"\b(?:{SHARE})\b", value))
+    return bool(re.search(rf"\b(?:{SHARE})\b", fold(question)))
 
 
 def intent_hints(question: str) -> dict[str, object]:
-    """Recognize complete, common business requests before asking the model."""
-    value = "".join(
-        c
-        for c in unicodedata.normalize("NFD", question.lower())
-        if unicodedata.category(c) != "Mn"
-    ).replace("đ", "d")
+    """Deterministic readings of a question: dates always, other fields as fallback."""
+    value = fold(question)
+    vocab = vocabulary.get()
     hints: dict[str, object] = {**date_hints(question)}
-    growth = (
-        r"\b(?:tang truong|growth|(?:tang|giam) bao nhieu"
-        r"|so voi (?:thang|quy|ky) (?:lien )?truoc)\b"
-    )
-    found: list[str] = []
-    if re.search(r"(?<![\w.])(?:doanh thu|doanh so|revenue|sales)(?![\w.])", value):
-        found.append("sales_growth" if re.search(growth, value) else "revenue")
-    if re.search(r"\b(?:san luong|san xuat|production output)\b", value):
-        found.append("production_output")
-    if re.search(r"\b(?:ty le loi|ty le phe pham|phe pham|scrap|defect)\b", value):
-        found.append("defect_rate")
-    if re.search(
-        r"\b(?:dung han|tre han|dung tien do|on[- ]time|late orders?)\b", value
-    ):
-        found.append("on_time_rate")
-    # Profit has no approved definition; several metrics need a clarification.
-    if len(found) == 1 and not re.search(r"\b(?:loi nhuan|profit)\b", value):
+    found = vocab.match_metrics(value)
+    if re.search(GROWTH, value) and "revenue" in found and "sales_growth" not in found:
+        found = ["sales_growth" if m == "revenue" else m for m in found]
+    if "sales_growth" in found and "revenue" in found:
+        found.remove("revenue")
+    if len(found) == 1:
         hints["metric_id"] = found[0]
     if re.search(r"\b(?:so sanh|compare|chart|so voi)\b", value):
         months = list(
@@ -215,15 +142,11 @@ def intent_hints(question: str) -> dict[str, object]:
                 )
     if re.search(STACK, value) and (pair := stacked_dimensions(value)):
         hints.update(dimension=pair[0], series_dimension=pair[1], limit=250)
-    territories = [
-        name
-        for name, pattern in TERRITORIES.items()
-        if re.search(rf"\b(?:{pattern})\b", value)
-    ]
-    if territories:
-        hints["territory"] = "|".join(territories)
+    named = vocab.match_members(value).get("sales_territory", [])
+    if named:
+        hints["territory"] = "|".join(named)
         asks_comparison = re.search(rf"\b(?:so sanh|compare|{SHARE})\b", value)
-        if "dimension" not in hints and (len(territories) >= 2 or asks_comparison):
+        if "dimension" not in hints and (len(named) >= 2 or asks_comparison):
             hints["dimension"] = "sales_territory"  # one row per named territory
     return hints
 

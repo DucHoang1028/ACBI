@@ -8,7 +8,8 @@ from pydantic import ValidationError
 
 from app.ai.budget import RequestBudget
 from app.ai.client import FakeLLM
-from app.core.dates import METRIC_WORDS, fold
+from app.core.dates import metric_words
+from app.core.text import fold
 from app.presentation.charts import TABLE, VizConfig, describe, validate_viz
 
 CHART_WORDS = (
@@ -54,7 +55,7 @@ def requested_chart(question: str) -> str | None:
 
 def reshape_kind(question: str) -> str | None:
     """A pure display request, such as 'show that as a pie chart'."""
-    if re.search(METRIC_WORDS, fold(question)):
+    if re.search(metric_words(), fold(question)):
         return None
     return requested_chart(question)
 

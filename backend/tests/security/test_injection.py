@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 from app.ai.budget import RequestBudget
-from app.ai.client import DIMENSIONS, METRICS, FakeLLM, Intent, SQLCandidate
+from app.ai.client import FakeLLM, Intent, SQLCandidate, dimension_ids, metric_ids
 from app.conversation.intent import local_intent, merged_intent
 from app.query.builder import prepare
 from app.query.validation import SQLPolicyError, validate
@@ -22,7 +22,7 @@ INJECTIONS = [
 def test_local_intent_holds_only_approved_vocabulary(question: str) -> None:
     built = local_intent(question)
     if built is not None:  # e.g. a real revenue question with junk appended
-        assert built.metric_id in METRICS and built.dimension in DIMENSIONS
+        assert built.metric_id in metric_ids() and built.dimension in dimension_ids()
         assert built.territory is None
 
 

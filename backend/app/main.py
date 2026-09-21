@@ -25,6 +25,8 @@ from app.core.warehouse import inspect_anchor, warehouse_engine
 from app.history.service import migrate as migrate_history
 from app.metadata.dictionary import approved_metrics, load_dictionary
 from app.metadata.retrieval import BM25Retriever
+from app.metadata.vocabulary import Vocabulary, load_members
+from app.metadata.vocabulary import install as install_vocabulary
 
 logger = logging.getLogger("acbi.startup")
 
@@ -65,6 +67,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )["examples"]
         app.state.retriever = BM25Retriever(dictionary, examples)
         app.state.warehouse = warehouse
+        # Names, synonyms and dimension members come from the dictionary and the data.
+        vocab = Vocabulary(dictionary)
+        load_members(warehouse, vocab)
+        install_vocabulary(vocab)
         app.state.llm = GroqClient(settings) if settings.groq_keys() else None
         app.state.stt = GroqSTT(settings) if settings.groq_keys() else None
         app.state.dictionary = dictionary

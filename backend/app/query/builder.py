@@ -96,6 +96,23 @@ def build(intent: Intent, role: str, anchor: date) -> QueryPlan:
     return QueryPlan(sql=sql, params=params, metric_id=metric, start=start, end=end)
 
 
+def growth_baseline(period: str | None, start: date, end: date) -> tuple[date, date]:
+    """The span a growth figure is measured against.
+
+    A complete last month or quarter is compared with the whole period before it. A
+    running month or quarter is compared with the same number of days at the start of
+    the previous one, so the two spans are alike."""
+    if period in {"last_month", "this_month"}:
+        base = month_start(start, -1)
+    elif period in {"last_quarter", "this_quarter"}:
+        base = month_start(start, -3)
+    else:
+        raise ValueError("Growth requires a complete previous month or quarter")
+    if period in {"last_month", "last_quarter"}:
+        return base, start
+    return base, min(base + (end - start), start)
+
+
 def prepare(intent: Intent, role: str, anchor: date) -> QueryPlan:
     factory_id = authorize(intent, role)
     assert intent.metric_id is not None
@@ -115,12 +132,9 @@ def prepare(intent: Intent, role: str, anchor: date) -> QueryPlan:
                 }
             )
     if intent.metric_id == "sales_growth":
-        if intent.period not in {"last_month", "last_quarter"}:
-            raise ValueError("Growth requires a complete previous month or quarter")
-        params["baseline_start"] = month_start(
-            start, -3 if intent.period == "last_quarter" else -1
+        params["baseline_start"], params["baseline_end"] = growth_baseline(
+            intent.period, start, end
         )
-        params["baseline_end"] = start
     return QueryPlan("", params, intent.metric_id, start, end)
 
 
@@ -182,12 +196,9 @@ def sales_sql(intent: Intent, params: dict[str, Any], start: date) -> str:
     else:
         territory_where = " AND t.name=:territory" if intent.territory else ""
     if metric == "sales_growth":
-        if intent.period not in {"last_month", "last_quarter"}:
-            raise ValueError("Growth requires a complete previous month or quarter")
-        params["baseline_start"] = month_start(
-            start, -3 if intent.period == "last_quarter" else -1
+        params["baseline_start"], params["baseline_end"] = growth_baseline(
+            intent.period, start, params["end"]
         )
-        params["baseline_end"] = start
         return f"""
 WITH periods AS (
  SELECT SUM(h.subtotal) FILTER (WHERE h.orderdate>=:start AND h.orderdate<:end) AS current_revenue,

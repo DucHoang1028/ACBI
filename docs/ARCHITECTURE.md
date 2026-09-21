@@ -8,10 +8,10 @@ The proposal's eight backend responsibilities are retained: Query Orchestration,
 | --- | --- |
 | Query Orchestration | `query/orchestrator.py` (the eleven-step pipeline, `answer`); `api/chat.py` is only the HTTP wrapper |
 | Authentication and Authorization | `auth/`, `api/auth.py`; `query/builder.authorize` for metric, factory and territory scope |
-| Conversation Management | `conversation/service.py` (slots, turns, pending clarification), `conversation/intent.py` (merge context, validate factory, territory and breakdown choices), `conversation/glossary.py` (small talk, definitions from the dictionary) |
+| Conversation Management | `conversation/service.py` (slots, turns, pending clarification), `conversation/intent.py` (merge context, validate factory, territory and breakdown choices), `conversation/dialogue.py` (grounded answers about the data and small talk) |
 | AI Integration | `ai/client.py` (`LLMClient`, `GroqClient`, `FakeLLM`), `ai/keys.py` (key pool and failover), `ai/budget.py` (`RequestBudget`), `ai/stt.py` |
-| Business Metadata and Retrieval | `metadata/` (dictionary, scoped BM25 retriever) |
-| Query Processing | `query/builder.py` (approved templates), `query/validation.py` (shared sqlglot gate), `query/shortcuts.py` (fixed listings, same gate), `query/forecast.py` (labelled trend forecast, refusable) |
+| Business Metadata and Retrieval | `metadata/` (dictionary, `vocabulary.py` names, synonyms and members from the dictionary and the data, scoped BM25 retriever) |
+| Query Processing | `query/builder.py` (approved templates), `query/validation.py` (shared sqlglot gate), `query/forecast.py` (labelled trend forecast, refusable) |
 | Result Presentation | `presentation/charts.py` (config validation), `presentation/visualization.py` (AI proposal loop, named chart types), `presentation/summary.py`, `presentation/analysis.py` (comparisons and highlights computed from rows), `presentation/messages.py` (no raw internal errors), `presentation/contract.py` (response contract) |
 | History and Audit | `history/service.py` (saved results, transcript, `access_audit`), `api/history.py` |
 

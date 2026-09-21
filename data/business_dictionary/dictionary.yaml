@@ -16,8 +16,12 @@ dataSources:
 businessMetrics:
 - metricId: production_output
   name: Production output
+  displayName: {vi: Sản lượng, en: Production output}
+  synonyms:
+    vi: [sản lượng, số lượng sản xuất]
+    en: [production output, output, produced units]
   domain: production
-  description: Production output; approved definition
+  description: "Good units produced by work orders (ordered minus scrapped), dated by completion. Use for output or produced quantity (sản lượng)."
   supportedDimensions:
   - date
   - product
@@ -36,8 +40,12 @@ businessMetrics:
     emptySetPolicy: no_data; do not coalesce absence to zero
 - metricId: defect_rate
   name: Defect rate
+  displayName: {vi: Tỷ lệ phế phẩm, en: Defect rate}
+  synonyms:
+    vi: [tỷ lệ phế phẩm, tỷ lệ lỗi, phế phẩm, phế liệu, hàng lỗi]
+    en: [defect rate, scrap rate, scrap, defects]
   domain: quality
-  description: Defect rate; approved definition
+  description: "Share of ordered units that were scrapped. Use for defect, scrap or error rate (tỷ lệ lỗi, phế phẩm)."
   supportedDimensions:
   - date
   - product
@@ -57,8 +65,13 @@ businessMetrics:
     emptySetPolicy: no_data; do not coalesce absence to zero
 - metricId: on_time_rate
   name: On-time completion rate
+  displayName: {vi: Tỷ lệ hoàn thành đúng hạn, en: On-time completion rate}
+  synonyms:
+    vi: [đúng hạn, hoàn thành đúng hạn, trễ hạn, đúng tiến độ]
+    en: [on-time, on time, late work orders]
   domain: production
-  description: Share of work orders finished on or before their due date. Added 2026-09-21 at the owner's request to cover the proposal's line-performance example; the formula was proposed by the assistant and approved by the owner's delegation, so review it.
+  description: "Share of work orders finished on or before their due date. Use for on-time or late completion (đúng hạn, trễ hạn)."
+  reviewNote: Added 2026-09-21 at the owner's request to cover the proposal's line-performance example; the formula was proposed by the assistant and approved by the owner's delegation, so review it.
   supportedDimensions:
   - date
   - product
@@ -77,8 +90,12 @@ businessMetrics:
     emptySetPolicy: no_data; do not coalesce absence to zero
 - metricId: revenue
   name: Revenue
+  displayName: {vi: Doanh thu, en: Revenue}
+  synonyms:
+    vi: [doanh thu, doanh số]
+    en: [revenue, sales]
   domain: sales
-  description: Revenue; approved definition
+  description: "Sum of order subtotals (tax and freight excluded), dated by order date. Use for revenue or sales amounts (doanh thu, doanh số)."
   supportedDimensions:
   - date
   - sales_territory
@@ -96,8 +113,12 @@ businessMetrics:
     emptySetPolicy: no_data; do not coalesce absence to zero
 - metricId: sales_growth
   name: Sales growth
+  displayName: {vi: Tăng trưởng doanh thu, en: Revenue growth}
+  synonyms:
+    vi: [tăng trưởng doanh thu, tăng trưởng]
+    en: [revenue growth, sales growth, growth]
   domain: sales
-  description: Sales growth; approved definition
+  description: "Percentage change of revenue against the immediately preceding period of equal length: last month against the month before, last quarter against the quarter before. Use when the user compares with the previous period or asks how much revenue grew or fell (so với tháng trước, tăng hoặc giảm bao nhiêu)."
   supportedDimensions:
   - date
   - sales_territory
@@ -114,31 +135,71 @@ businessMetrics:
 dimensions:
 - dimensionId: date
   name: Date
-  description: Metric-specific orderdate/enddate; half-open intervals
+  displayName: {vi: Thời gian, en: Date}
+  grains:
+    month:
+      vi: [tháng, hàng tháng]
+      en: [month, monthly]
+    week:
+      vi: [tuần, hàng tuần]
+      en: [week, weekly]
+    day:
+      vi: [ngày, hàng ngày]
+      en: [day, daily]
+  description: "Metric-specific orderdate/enddate; half-open intervals"
   approvalStatus: approved
 - dimensionId: product
   name: Product
-  description: production.product.productid; workorder.productid
+  displayName: {vi: Sản phẩm, en: Product}
+  synonyms:
+    vi: [sản phẩm]
+    en: [product]
+  description: "production.product.productid; workorder.productid"
   approvalStatus: approved
 - dimensionId: product_category
   name: Product category
-  description: product.productsubcategoryid -> productsubcategory.productcategoryid -> productcategory
+  displayName: {vi: Danh mục sản phẩm, en: Product category}
+  synonyms:
+    vi: [danh mục, nhóm sản phẩm, loại sản phẩm]
+    en: [category, product category]
+  memberSource: {table: production.productcategory, column: name}
+  description: "product.productsubcategoryid -> productsubcategory.productcategoryid -> productcategory"
   approvalStatus: approved
 - dimensionId: sales_territory
   name: Sales territory
-  description: sales.salesorderheader.territoryid -> sales.salesterritory.territoryid
+  displayName: {vi: Khu vực bán hàng, en: Sales territory}
+  synonyms:
+    vi: [khu vực, vùng, quốc gia, nước]
+    en: [territory, region, country]
+  memberSource: {table: sales.salesterritory, column: name}
+  description: "sales.salesorderheader.territoryid -> sales.salesterritory.territoryid"
   approvalStatus: approved
 - dimensionId: production_line
   name: Production line
-  description: production.location; terminal routing operation only; unrouted is unassigned
+  displayName: {vi: Dây chuyền sản xuất, en: Production line}
+  synonyms:
+    vi: [dây chuyền, công đoạn]
+    en: [production line, line]
+  memberSource: {table: production.location, column: name}
+  description: "production.location; terminal routing operation only; unrouted is unassigned"
   approvalStatus: approved
 - dimensionId: factory
   name: Factory
-  description: Synthetic acbi_demo.location_factory -> acbi_demo.factory; not supported for revenue
+  displayName: {vi: Nhà máy, en: Factory}
+  synonyms:
+    vi: [nhà máy, xưởng]
+    en: [factory, plant]
+  memberSource: {table: acbi_demo.factory, column: name, idColumn: factory_id}
+  description: "Synthetic acbi_demo.location_factory -> acbi_demo.factory; not supported for revenue"
   approvalStatus: approved
 - dimensionId: scrap_reason
   name: Scrap reason
-  description: production.workorder.scrapreasonid -> production.scrapreason; NULL displayed as Unspecified
+  displayName: {vi: Lý do phế phẩm, en: Scrap reason}
+  synonyms:
+    vi: [lý do phế phẩm, nguyên nhân phế phẩm, lý do]
+    en: [scrap reason, reason]
+  memberSource: {table: production.scrapreason, column: name}
+  description: "production.workorder.scrapreasonid -> production.scrapreason; NULL displayed as Unspecified"
   approvalStatus: approved
 dataMappings:
 - mappingId: production_fact

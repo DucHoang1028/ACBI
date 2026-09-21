@@ -6,7 +6,6 @@ from app.conversation.intent import merged_intent
 from app.core.dates import date_hints, resolve_period
 from app.presentation.summary import factual
 from app.query.builder import build
-from app.query.shortcuts import special_kind
 from app.query.validation import validate
 
 
@@ -54,15 +53,6 @@ def test_date_only_reply_keeps_metric_and_clears_redundant_clarification() -> No
     assert resolved.metric_id == "revenue"
     assert (resolved.start_date, resolved.end_date) == ("2025-06-01", "2025-07-01")
     assert not resolved.needs_clarification
-
-
-def test_unresolved_business_ambiguity_and_vague_dates_stay_clarifications() -> None:
-    resolved = merged_intent(
-        intent(missing_fields=["request"]), None, "Doanh thu và lợi nhuận tháng này"
-    )
-    assert resolved.needs_clarification
-    assert merged_intent(intent(period="recently"), None).needs_clarification
-    assert date_hints("So sánh tháng này với tháng trước") == {}
 
 
 def test_incomplete_new_date_does_not_reuse_old_literal_dates() -> None:
@@ -117,33 +107,6 @@ def test_year_and_two_territories_are_enough_information() -> None:
     assert ":territory_0" in validated.sql and ":territory_1" in validated.sql
 
 
-def test_common_business_wording_and_data_overview_do_not_need_exact_metric_ids() -> (
-    None
-):
-    assert (
-        merged_intent(intent(metric_id=None), None, "Sản xuất tháng này").metric_id
-        == "production_output"
-    )
-    assert (
-        merged_intent(intent(metric_id=None), None, "Tỷ lệ lỗi quý trước").metric_id
-        == "defect_rate"
-    )
-    assert (
-        special_kind("Database có bao nhiêu nhà máy và những nhà máy nào?")
-        == "factories"
-    )
-    assert special_kind("Có dữ liệu năm 2024 không?") == "coverage"
-    assert special_kind("Doanh thu của từng nhà máy") == "factory_revenue"
-
-
-def test_shortcut_answers_are_role_gated() -> None:
-    from app.query.shortcuts import SPECIAL_ROLES
-
-    assert "production" not in SPECIAL_ROLES["coverage"]
-    assert "sales" not in SPECIAL_ROLES["factories"]
-    assert "it_admin" not in {r for roles in SPECIAL_ROLES.values() for r in roles}
-
-
 def test_growth_wording_maps_to_sales_growth() -> None:
     from app.core.dates import intent_hints
 
@@ -153,52 +116,6 @@ def test_growth_wording_maps_to_sales_growth() -> None:
     ):
         assert intent_hints(text)["metric_id"] == "sales_growth"
     assert intent_hints("Doanh thu tháng trước")["metric_id"] == "revenue"
-
-
-def test_multi_metric_and_month_pair_questions() -> None:
-    from app.core.dates import intent_hints
-
-    assert "metric_id" not in intent_hints("Tổng doanh thu và tỷ lệ phế phẩm")
-    assert "metric_id" not in intent_hints("Doanh thu và lợi nhuận tháng này")
-    pair = intent_hints("Doanh thu tháng 5 so với tháng 4 năm 2025")
-    assert (pair["start_date"], pair["end_date"]) == ("2025-04-01", "2025-06-01")
-    assert pair["dimension"] == "month"
-
-
-def test_listing_reshaping_and_share_questions() -> None:
-    from datetime import date
-
-    from app.core.dates import intent_hints
-    from app.presentation.summary import share_text
-    from app.presentation.visualization import reshape_kind, reshaped
-    from app.query.shortcuts import special_kind
-
-    assert special_kind("Cho tôi tất cả khu vực hiện tại đang có trong dữ liệu") == (
-        "territories"
-    )
-    assert special_kind("Cho tôi doanh thu của tất cả khu vực năm 2024") is None
-    assert special_kind("Liệt kê các dây chuyền sản xuất") == "lines"
-    assert reshape_kind("Đổi sang biểu đồ tròn") == "pie"
-    assert reshape_kind("Hiển thị dạng bảng") == "table"
-    assert reshape_kind("Cho tôi chart so sánh doanh thu tháng 5 và tháng 6") is None
-    hints = intent_hints("Doanh thu Đức và Anh chiếm bao nhiêu phần trăm năm 2023")
-    assert hints["territory"] == "Germany|United Kingdom"
-
-    rows = [
-        {
-            "territoryid": str(i),
-            "territory": f"T{i}",
-            "revenue": "100",
-            "sample_count": 1,
-        }
-        for i in range(10)
-    ]
-    text = share_text(rows, ["T1", "T2"], date(2023, 1, 1), date(2024, 1, 1), "vi")
-    assert text is not None and "20.00%" in text and "2023-12-31" in text
-    viz, note = reshaped("pie", rows, "vi")  # 10 groups: pie is not allowed
-    assert viz["type"] == "bar" and "biểu đồ cột" in note
-    assert viz["y"] == ["revenue"] and viz["x"] == "territory"
-    assert reshaped("table", rows, "en")[0]["type"] == "table"
 
 
 def test_all_chart_types_are_recognised_and_mapped() -> None:
@@ -296,33 +213,6 @@ def test_transcript_keeps_every_turn_in_order() -> None:
     assert build_transcript([], []) == []
 
 
-def test_unknown_factory_and_territory_are_asked_about() -> None:
-    from app.conversation.intent import clarification_text, merged_intent
-
-    factory_d = merged_intent(
-        intent(
-            metric_id="defect_rate", period="last_quarter", needs_clarification=False
-        ),
-        None,
-        "Tỷ lệ phế phẩm của Factory D quý trước",
-    )
-    assert factory_d.needs_clarification and factory_d.missing_fields == ["factory_id"]
-    assert "Factory A, B và C" in clarification_text(factory_d, "vi")
-
-    named = merged_intent(
-        intent(territory="Đức và Pháp", needs_clarification=False, period="last_year"),
-        None,
-        "Doanh thu của Đức và Pháp năm ngoái",
-    )
-    assert named.territory == "France|Germany"
-    asia = merged_intent(
-        intent(territory="Asia", needs_clarification=False, period="last_year"),
-        None,
-        "Doanh thu Asia năm ngoái",
-    )
-    assert asia.missing_fields == ["territory"]
-
-
 def test_unresolved_turn_keeps_earlier_slots() -> None:
     from app.query.orchestrator import carry_slots
 
@@ -332,23 +222,6 @@ def test_unresolved_turn_keeps_earlier_slots() -> None:
     assert kept["metric_id"] == "revenue" and kept["period"] == "last_month"
     assert "factory_id" not in kept  # an invalid factory never becomes a slot
     assert carry_slots(prior, intent(period="last_quarter"))["period"] == "last_quarter"
-
-
-def test_named_countries_filter_the_answer() -> None:
-    from app.conversation.intent import local_intent
-    from app.core.dates import intent_hints
-
-    both = local_intent("cho tôi doanh thu của Đức và Pháp năm 2025 đi")
-    assert both and both.territory == "France|Germany"
-    assert both.dimension == "sales_territory"
-    one = local_intent("Doanh thu năm 2024 của Canada")
-    assert one and one.territory == "Canada" and one.dimension == "none"
-    # "Anh" alone is ambiguous (the UK, or a form of address): the model decides.
-    assert local_intent("Doanh thu của Anh năm 2024") is None
-    assert "territory" not in intent_hints("anh ơi cho em xem doanh thu tháng này")
-    assert intent_hints("Doanh thu của Đức và Anh năm 2023")["territory"] == (
-        "Germany|United Kingdom"
-    )
 
 
 def test_answers_read_the_rows_instead_of_repeating_a_template() -> None:
@@ -388,76 +261,6 @@ def test_internal_errors_never_reach_the_user() -> None:
     assert friendly(Explained("Custom note"), "vi") == "Custom note"
 
 
-def test_definitions_and_small_talk_come_from_fixed_vocabulary() -> None:
-    from pathlib import Path
-
-    import yaml
-    from app.conversation.glossary import converse
-
-    path = Path(__file__).resolve().parents[3] / "data/business_dictionary"
-    dictionary = yaml.safe_load((path / "dictionary.yaml").read_text("utf-8"))
-    de = converse("germany trong dữ liệu bạn nói tiếng việt là gì", "vi", dictionary)
-    assert de and "Germany là Đức" in de
-    rev = converse("Doanh thu là gì", "vi", dictionary)
-    assert (
-        rev and "SUM(sales.salesorderheader.subtotal)" in rev and "Phiên bản 1" in rev
-    )
-    assert converse("Chào bạn", "vi", dictionary)
-    assert converse("bạn làm được gì", "vi", dictionary)
-    assert converse("Doanh thu tháng này là gì", "vi", dictionary) is None
-    assert converse("Doanh thu theo khu vực năm 2024", "vi", dictionary) is None
-
-
-def test_forecast_requests_are_declined_not_answered_as_empty_data() -> None:
-    from app.conversation.glossary import asks_forecast
-
-    asked = (
-        "Dựa trên doanh thu của đức và pháp thì bạn có dự đoán được trong năm 2026 "
-        "doanh thu sẽ phát triển theo hướng nào",
-        "Dự báo sản lượng tháng tới",
-        "Vật tư nào có nguy cơ thiếu cho kế hoạch sản xuất tuần tới?",
-        "Forecast revenue for next year",
-        "Doanh thu quý sau sẽ ra sao",
-    )
-    for text in asked:
-        assert asks_forecast(text), text
-    recorded = (
-        "Doanh thu năm 2024",
-        "Xu hướng doanh thu theo tháng năm 2024",
-        "Doanh thu năm ngoái",
-        "Doanh thu năm 2030",  # a named future year is still a plain no-data query
-        "Sản lượng tháng trước",
-    )
-    for text in recorded:
-        assert not asks_forecast(text), text
-
-
-def test_efficiency_and_unsupported_breakdowns_ask_instead_of_guessing() -> None:
-    from app.conversation.glossary import asks_materials
-    from app.conversation.intent import clarification_text, merged_intent
-
-    blank = intent(
-        metric_id="production_output", period="today", needs_clarification=False
-    )
-    eff = merged_intent(
-        blank, None, "Hiệu suất các dây chuyền sản xuất hôm nay như thế nào?"
-    )
-    assert eff.missing_fields == ["efficiency"]
-    assert "hoàn thành đúng hạn" in clarification_text(eff, "vi")
-    named = merged_intent(blank, None, "Sản lượng hôm nay, hiệu suất theo sản lượng")
-    assert named.missing_fields != ["efficiency"]
-
-    by_staff = merged_intent(
-        intent(period="last_year", needs_clarification=False),
-        None,
-        "Doanh thu theo nhân viên bán hàng năm 2024",
-    )
-    assert by_staff.missing_fields == ["dimension"]
-    assert "nhân viên bán hàng" in clarification_text(by_staff, "vi")
-    assert asks_materials("Vật tư nào có nguy cơ thiếu cho kế hoạch sản xuất tuần tới?")
-    assert not asks_materials("Sản lượng tuần trước")
-
-
 def test_on_time_rate_is_a_template_metric_with_its_own_wording() -> None:
     from datetime import date
 
@@ -473,3 +276,100 @@ def test_on_time_rate_is_a_template_metric_with_its_own_wording() -> None:
     assert hints_local.dimension == "production_line"
     today = local_intent("Sản lượng hôm nay")
     assert today and today.period == "today"
+
+
+def test_the_models_intent_type_decides_routing_and_is_not_overwritten() -> None:
+    from app.conversation.intent import merged_intent
+
+    for kind in ("unsupported", "metadata", "chat", "forecast"):
+        raw = intent(metric_id=None, intent_type=kind, needs_clarification=False)
+        assert merged_intent(raw, None, "Doanh thu và lợi nhuận tháng này") is raw
+    vague = merged_intent(
+        intent(metric_id="revenue", period="recently"), None, "Doanh thu gần đây"
+    )
+    assert vague.period == "recently"  # the pipeline asks for a period, as before
+
+
+def test_hints_fill_gaps_but_never_overrule_the_model() -> None:
+    from app.conversation.intent import merged_intent
+
+    model_says = intent(metric_id="defect_rate", period="last_month")
+    kept = merged_intent(model_says, None, "Doanh thu tháng này")
+    assert kept.metric_id == "defect_rate"  # a keyword does not beat the model
+    assert kept.period == "this_month"  # calendar wording is the backend's job
+    gap = merged_intent(intent(metric_id=None), None, "Sản lượng tháng này")
+    assert gap.metric_id == "production_output"
+
+
+def test_vocabulary_comes_from_the_dictionary_not_from_code() -> None:
+    from app.core.dates import intent_hints, single_dimension, territory_names
+    from app.core.text import fold
+    from app.metadata import vocabulary
+
+    assert (
+        intent_hints("Doanh thu và tỷ lệ phế phẩm quý trước").get("metric_id") is None
+    )
+    assert (
+        intent_hints("Tỷ lệ hoàn thành đúng hạn quý trước")["metric_id"]
+        == "on_time_rate"
+    )
+    assert single_dimension(fold("theo dây chuyền")) == "production_line"
+    assert single_dimension(fold("theo tháng")) == "month"
+    assert territory_names("germany and france") == ["France", "Germany"]
+    assert territory_names("Asia") is None
+    vocab = vocabulary.get()
+    assert vocab.unknown_member_reference("ty le phe pham cua factory d") == "factory"
+    assert vocab.unknown_member_reference("ty le phe pham cua nha may a") is None
+    vocab.members["sales_territory"] = ["Atlantis"]  # a different database
+    try:
+        assert territory_names("atlantis") == ["Atlantis"]
+        assert territory_names("germany") is None
+    finally:
+        vocab.members["sales_territory"] = [
+            "Australia",
+            "Canada",
+            "Central",
+            "France",
+            "Germany",
+            "Northeast",
+            "Northwest",
+            "Southeast",
+            "Southwest",
+            "United Kingdom",
+        ]
+
+
+def test_unknown_factory_and_territory_are_asked_about() -> None:
+    from app.conversation.intent import clarification_text, merged_intent
+
+    factory_d = merged_intent(
+        intent(
+            metric_id="defect_rate", period="last_quarter", needs_clarification=False
+        ),
+        None,
+        "Tỷ lệ phế phẩm của Factory D quý trước",
+    )
+    assert factory_d.needs_clarification and factory_d.missing_fields == ["factory_id"]
+    assert "Factory A" in clarification_text(factory_d, "vi")
+    named = merged_intent(
+        intent(
+            territory="germany and france",
+            needs_clarification=False,
+            period="last_year",
+        ),
+        None,
+        "Doanh thu của Germany và France năm ngoái",
+    )
+    assert named.territory == "France|Germany"
+    asia = merged_intent(
+        intent(territory="Asia", needs_clarification=False, period="last_year"),
+        None,
+        "Doanh thu Asia năm ngoái",
+    )
+    assert asia.missing_fields == ["territory"]
+    bad_id = merged_intent(
+        intent(factory_id=9, metric_id="production_output", period="last_month"),
+        None,
+        "Sản lượng nhà máy 9 tháng trước",
+    )
+    assert bad_id.missing_fields == ["factory_id"]

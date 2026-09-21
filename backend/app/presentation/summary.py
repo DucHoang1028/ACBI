@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from app.metadata import vocabulary
 from app.presentation.analysis import highlights
 
 
@@ -15,45 +16,46 @@ def factual(
     end: date,
     language: str = "en",
 ) -> str:
+    vocab = vocabulary.get()
+    ratio = metric_id in vocab.ratio_metrics()
+    metric = vocab.metrics.get(metric_id)
+    unit = metric.unit if metric else ""
     if language == "vi":
-        label = {
-            "revenue": "Doanh thu",
-            "sales_growth": "Tăng trưởng doanh thu",
-            "production_output": "Sản lượng",
-            "defect_rate": "Tỷ lệ phế phẩm",
-            "on_time_rate": "Tỷ lệ hoàn thành đúng hạn",
-        }[metric_id]
+        label = vocab.metric_label(metric_id, "vi")
         period_vi = f"{start:%d/%m/%Y} đến {end - timedelta(days=1):%d/%m/%Y}"
         if not rows:
             return f"Không có dữ liệu {label.lower()} từ {period_vi}."
         if len(rows) == 1 and rows[0].get(metric_id) is not None:
             number = Decimal(str(rows[0][metric_id]))
-            ratio = metric_id in {"defect_rate", "sales_growth", "on_time_rate"}
             formatted = (
                 f"{number * 100 if ratio else number:,.2f}".replace(",", "_")
                 .replace(".", ",")
                 .replace("_", ".")
             )
-            unit = (
+            suffix = (
                 "%"
                 if ratio
-                else " đơn vị tiền tệ nguồn" if metric_id == "revenue" else " sản phẩm"
+                else (
+                    " đơn vị tiền tệ nguồn"
+                    if unit == "source_currency"
+                    else " sản phẩm" if unit == "units" else ""
+                )
             )
-            return f"{label} từ {period_vi}: {formatted}{unit}."
+            return f"{label} từ {period_vi}: {formatted}{suffix}."
         return f"{label} từ {period_vi}: {len(rows)} nhóm. " + (
             highlights(metric_id, rows, "vi") or "Chi tiết trong bảng bên dưới."
         )
     period = f"{start.isoformat()} to {(end - timedelta(days=1)).isoformat()}"
-    label = metric_id.replace("_", " ").capitalize()
+    label = vocab.metric_label(metric_id, "en")
     if not rows:
         return f"No {label.lower()} records for {period}."
     if len(rows) == 1 and rows[0].get(metric_id) is not None:
-        unit = (
+        suffix = (
             " source currency"
-            if metric_id == "revenue"
-            else " units" if metric_id == "production_output" else " ratio"
+            if unit == "source_currency"
+            else " units" if unit == "units" else " ratio" if ratio else ""
         )
-        return f"{label}: {rows[0][metric_id]}{unit} for {period}."
+        return f"{label}: {rows[0][metric_id]}{suffix} for {period}."
     return f"{label} for {period}: {len(rows)} groups. " + (
         highlights(metric_id, rows, "en") or "Values are in the table."
     )

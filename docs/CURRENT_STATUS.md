@@ -10,7 +10,7 @@ always-on production service. The current temporary link is in README.
 | React/TypeScript frontend | Vietnamese/English login, questions, editable voice transcripts, tables, charts, saved results, and administration. |
 | Nginx web container | Serves the frontend and proxies API requests; demo login throttling and forwarded HTTPS scheme. |
 | FastAPI backend | Authentication, fixed role scopes, question orchestration, clarification/context, SQL validation, chart validation, history and audit. |
-| Query processing | Approved structured SQL templates plus scoped BM25 retrieval and Groq SQL proposals; validation before read-only execution. |
+| Query processing | The model classifies each question (`intent_type`) and reads it; approved SQL templates plus scoped BM25 retrieval and Groq SQL proposals answer data questions, questions about the data are answered from scoped metadata, and everything passes validation before read-only execution. |
 | Groq | `openai/gpt-oss-120b` for structured interpretation and proposals; `whisper-large-v3-turbo` for transcription. |
 | Application PostgreSQL | Accounts, hashed passwords, sessions, conversation context, saved rows/charts/provenance, and audit records; internal-only Docker network. |
 | External AdventureWorks | Source data accessed as `acbi_ro` over verified TLS; the synthetic factory extension remains explicitly documented. |

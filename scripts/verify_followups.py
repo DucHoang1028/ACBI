@@ -20,6 +20,20 @@ KPI = "Doanh thu năm 2023 dạng thẻ KPI"
 PIE = "Doanh thu theo danh mục sản phẩm năm 2023 dạng biểu đồ tròn"
 LINE = "Doanh thu theo tháng năm 2023 dạng biểu đồ đường"
 OUTPUT = "Sản lượng theo tháng và dây chuyền dạng cột chồng năm {year}"
+TWO = "cho tôi doanh thu của Đức và Pháp năm 2025 đi"
+MEANING = "germany trong dữ liệu bạn nói tiếng việt là gì"
+HELLO = "Chào bạn"
+LISTING = "Cho tôi tất cả khu vực hiện tại đang có trong dữ liệu"
+FORECAST = (
+    "Dựa trên doanh thu của đức và pháp thì bạn có dự đoán được trong năm 2026 "
+    "doanh thu sẽ phát triển theo hướng nào"
+)
+FORECAST_OUT = "Dự báo sản lượng tháng tới"
+FORECAST_RATE = "Dự báo tỷ lệ phế phẩm năm tới"
+MATERIALS = "Vật tư nào có nguy cơ thiếu cho kế hoạch sản xuất tuần tới?"
+ONTIME = "Tỷ lệ hoàn thành đúng hạn năm 2024"
+BY_LINE = "Tỷ lệ hoàn thành đúng hạn theo dây chuyền năm 2024"
+TODAY = "Sản lượng hôm nay"
 EFFICIENCY = "Hiệu suất các dây chuyền sản xuất hôm nay như thế nào?"
 STAFF = "Doanh thu theo nhân viên bán hàng năm 2024"
 SHARE = "Nếu tính riêng doanh thu Đức và Anh thì nó chiếm bao nhiêu phần trăm năm 2023"
@@ -62,14 +76,66 @@ def main() -> None:
         anchor_day = app.state.readiness["data_as_of"]
         app.state.llm = FakeLLM(
             {
-                SHARE: clarify,
-                STACKED: clarify,
+                SHARE: variant(territory="Germany|United Kingdom"),
+                STACKED: variant(dimension="month", series_dimension="sales_territory"),
                 KPI: clarify,
+                TWO: variant(
+                    territory="Germany|France",
+                    dimension="sales_territory",
+                    needs_clarification=False,
+                    missing_fields=[],
+                ),
+                MEANING: variant(metric_id=None, intent_type="metadata"),
+                HELLO: variant(metric_id=None, intent_type="chat"),
+                LISTING: variant(metric_id=None, intent_type="metadata"),
+                FORECAST: variant(
+                    intent_type="forecast",
+                    territory="Germany|France",
+                    needs_clarification=False,
+                    missing_fields=[],
+                ),
+                FORECAST_OUT: variant(
+                    metric_id="production_output",
+                    intent_type="forecast",
+                    horizon_months=1,
+                    needs_clarification=False,
+                    missing_fields=[],
+                ),
+                FORECAST_RATE: variant(
+                    metric_id="defect_rate",
+                    intent_type="forecast",
+                    needs_clarification=False,
+                    missing_fields=[],
+                ),
+                MATERIALS: variant(metric_id=None, intent_type="unsupported"),
+                ONTIME: variant(
+                    metric_id="on_time_rate",
+                    needs_clarification=False,
+                    missing_fields=[],
+                ),
+                BY_LINE: variant(
+                    metric_id="on_time_rate",
+                    dimension="production_line",
+                    needs_clarification=False,
+                    missing_fields=[],
+                ),
+                TODAY: variant(
+                    metric_id="production_output",
+                    period="today",
+                    needs_clarification=False,
+                    missing_fields=[],
+                ),
                 output: variant(metric_id="production_output"),
                 PIE: variant(dimension="product_category"),
                 LINE: variant(dimension="month"),
-                EFFICIENCY: variant(metric_id="production_output", period="today"),
-                STAFF: variant(period="explicit", needs_clarification=False),
+                EFFICIENCY: variant(
+                    metric_id=None,
+                    needs_clarification=True,
+                    missing_fields=["metric_id"],
+                    clarification_question="Bạn muốn xem sản lượng, tỷ lệ phế phẩm "
+                    "hay tỷ lệ hoàn thành đúng hạn?",
+                ),
+                STAFF: variant(metric_id=None, intent_type="unsupported"),
             }
         )
         tokens = {}
@@ -93,12 +159,11 @@ def main() -> None:
             )
             return {"http": result.status_code, **result.json()}
 
-        listing = ask(
-            "manager", "Cho tôi tất cả khu vực hiện tại đang có trong dữ liệu"
-        )
-        assert listing["status"] == "ok" and len(listing["table"]) == 10, listing
-        denied = ask("production_a", "Cho tôi tất cả khu vực hiện tại đang có")
-        assert denied["status"] == "denied" and denied["http"] == 403, denied
+        app.state.llm.replies[LISTING] = "Các khu vực: Canada, France, Germany."
+        listing = ask("manager", LISTING)
+        assert listing["status"] == "ok", listing
+        assert listing["answer_text"] == app.state.llm.replies[LISTING], listing
+        assert listing["table"] == [] and not listing["saved"], listing
 
         share = ask("manager", SHARE)
         assert share["status"] == "ok", share
@@ -199,7 +264,7 @@ def main() -> None:
         assert foreign.status_code == 404, foreign.status_code
 
         # Conversational answers are grounded in the rows and the dictionary.
-        two = ask("manager", "cho tôi doanh thu của Đức và Pháp năm 2025 đi")
+        two = ask("manager", TWO)
         assert two["status"] == "ok" and len(two["table"]) == 2, two
         which = ask(
             "manager", "giữa 2 cái thì cái nào nhiều hơn", two["conversation_id"]
@@ -211,21 +276,19 @@ def main() -> None:
             "answer_text"
         ]
         assert which["table"] == two["table"] and which["viz_config"]["type"] == "table"
-        meaning = ask(
-            "manager",
-            "germany trong dữ liệu bạn nói tiếng việt là gì",
-            two["conversation_id"],
-        )
+        app.state.llm.replies[MEANING] = "Germany là Đức, một khu vực bán hàng."
+        meaning = ask("manager", MEANING, two["conversation_id"])
         assert "Germany là Đức" in meaning["answer_text"], meaning
-        hello = ask("manager", "Chào bạn", two["conversation_id"])
+        app.state.llm.replies[HELLO] = "Xin chào! Bạn muốn xem số liệu nào?"
+        hello = ask("manager", HELLO, two["conversation_id"])
         assert hello["status"] == "ok" and "Xin chào" in hello["answer_text"], hello
+        invented = "Có 987654 bảng dữ liệu."  # a number found in no reference
+        app.state.llm.replies[HELLO] = invented
+        dropped = ask("manager", HELLO, two["conversation_id"])
+        assert invented not in (dropped["answer_text"] or ""), dropped
 
         # Forecast: computed from recorded months, labelled, or refused with a reason.
-        forecast = ask(
-            "manager",
-            "Dựa trên doanh thu của đức và pháp thì bạn có dự đoán được trong năm 2026 "
-            "doanh thu sẽ phát triển theo hướng nào",
-        )
+        forecast = ask("manager", FORECAST)
         assert forecast["status"] in {"ok", "needs_clarification"}, forecast
         if forecast["status"] == "ok":
             info = forecast["sources"]["forecast"]
@@ -258,18 +321,19 @@ def main() -> None:
             forecast["status"],
             (forecast.get("answer_text") or forecast["message"])[:230],
         )
-        outside = ask("sales", "Dự báo sản lượng tháng tới")
+        outside = ask("sales", FORECAST_OUT)
         assert outside["status"] == "denied" and outside["http"] == 403, outside
-        rate = ask("manager", "Dự báo tỷ lệ phế phẩm năm tới")
+        rate = ask("manager", FORECAST_RATE)
         assert rate["status"] == "needs_clarification", rate
-        materials = ask(
-            "manager", "Vật tư nào có nguy cơ thiếu cho kế hoạch sản xuất tuần tới?"
+        app.state.llm.replies[MATERIALS] = (
+            "Tôi chưa có dữ liệu về vật tư hay tồn kho nên không trả lời được."
         )
+        materials = ask("manager", MATERIALS)
         assert materials["status"] == "needs_clarification"
-        assert "billofmaterials" in materials["message"], materials
+        assert "vật tư" in materials["message"], materials
 
         # New approved metric, day/week periods, and questions that must ask first.
-        ontime = ask("manager", "Tỷ lệ hoàn thành đúng hạn năm 2024")
+        ontime = ask("manager", ONTIME)
         assert ontime["status"] == "ok", ontime
         with app.state.warehouse.connect() as connection:
             expected_ratio = connection.execute(
@@ -282,22 +346,24 @@ def main() -> None:
         assert abs(
             Decimal(str(ontime["table"][0]["on_time_rate"])) - expected_ratio
         ) < (Decimal("0.000001"))
-        by_line = ask("manager", "Tỷ lệ hoàn thành đúng hạn theo dây chuyền năm 2024")
+        by_line = ask("manager", BY_LINE)
         assert by_line["status"] == "ok" and by_line["table"], by_line
         assert all(0 <= float(r["on_time_rate"]) <= 1 for r in by_line["table"])
-        today = ask("manager", "Sản lượng hôm nay")
+        today = ask("manager", TODAY)
         assert today["status"] in {"ok", "no_data"}, today
         assert today["sources"]["parameters"]["start"] == anchor_day, today["sources"]
         efficiency = ask("manager", EFFICIENCY)
         assert efficiency["status"] == "needs_clarification", efficiency
         assert "đúng hạn" in efficiency["message"], efficiency
+        app.state.llm.replies[STAFF] = "Tôi chưa chia được theo nhân viên bán hàng."
         staff = ask("manager", STAFF)
         assert staff["status"] == "needs_clarification", staff
         assert "nhân viên bán hàng" in staff["message"], staff
         client.post("/api/auth/logout")
     print(
-        "Follow-ups: territory list (scoped), Germany+UK share, stacked bar, KPI "
-        "card, pie, line, scatter and bar reconciled with reference SQL; reopened conversation restores every turn."
+        "Follow-ups: dialogue routing, Germany+UK share, stacked bar, KPI card, pie, "
+        "line, scatter, forecast, on-time metric and bar reconciled with reference SQL; "
+        "reopened conversation restores every turn."
     )
 
 

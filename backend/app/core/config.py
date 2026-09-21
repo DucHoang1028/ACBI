@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     send_results_to_llm: bool = False
     # Build a Structured Intent locally when the wording is unambiguous, sparing a
     # model call. Turn off to send every question to the LLM.
-    local_intent_enabled: bool = True
+    local_intent_enabled: bool = False
     # Forecasting: at least this many complete months, and a hold-out error no worse
     # than this share, otherwise the request is refused rather than answered weakly.
     forecast_min_months: int = Field(default=24, ge=12)
