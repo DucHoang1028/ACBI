@@ -88,22 +88,47 @@ def login(engine: Engine, username: str, password: str) -> tuple[str, str] | Non
             ),
             {"id": row["id"]},
         )
-        access, refresh = new_tokens()
-        connection.execute(
-            text("""
-            INSERT INTO app_sessions
-              (user_id,access_hash,refresh_hash,access_expires,refresh_expires)
-            VALUES (:id,:access,:refresh,:access_expires,:refresh_expires)
-        """),
-            {
-                "id": row["id"],
-                "access": digest(access),
-                "refresh": digest(refresh),
-                "access_expires": now + ACCESS_LIFETIME,
-                "refresh_expires": now + REFRESH_LIFETIME,
-            },
-        )
+        return start_session(connection, row["id"], now)
+
+
+def start_session(connection: Any, user_id: int, now: datetime) -> tuple[str, str]:
+    access, refresh = new_tokens()
+    connection.execute(
+        text("""
+        INSERT INTO app_sessions
+          (user_id,access_hash,refresh_hash,access_expires,refresh_expires)
+        VALUES (:id,:access,:refresh,:access_expires,:refresh_expires)
+    """),
+        {
+            "id": user_id,
+            "access": digest(access),
+            "refresh": digest(refresh),
+            "access_expires": now + ACCESS_LIFETIME,
+            "refresh_expires": now + REFRESH_LIFETIME,
+        },
+    )
     return access, refresh
+
+
+def demo_users(engine: Engine) -> list[dict[str, str]]:
+    """Accounts offered by the demo's one-click sign-in, in creation order."""
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text("SELECT username,role FROM app_users WHERE enabled ORDER BY id")
+        ).mappings()
+        return [dict(row) for row in rows]
+
+
+def demo_login(engine: Engine, username: str) -> tuple[str, str] | None:
+    """Sign in without a password. Only for the demo; the caller checks the switch."""
+    with engine.begin() as connection:
+        row = connection.execute(
+            text("SELECT id FROM app_users WHERE username=:username AND enabled"),
+            {"username": username},
+        ).first()
+        if row is None:
+            return None
+        return start_session(connection, row[0], datetime.now(timezone.utc))
 
 
 def rotate(engine: Engine, refresh: str) -> tuple[str, str] | None:

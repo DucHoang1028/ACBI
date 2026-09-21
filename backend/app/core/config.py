@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"  # a key it is closed to rests for an hour
     literouter_api_key: SecretStr = SecretStr("")
     literouter_model: str = "deepseek-v3.2:free"
+    # Demo only: one-click sign-in without a password (see /api/auth/demo-login).
+    demo_login_enabled: bool = False
     stt_model: str = "whisper-large-v3-turbo"
     llm_requests_per_minute: int = Field(default=15, ge=1)
     llm_tokens_per_minute: int = Field(default=8000, ge=1)

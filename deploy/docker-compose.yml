@@ -35,6 +35,7 @@ services:
       WAREHOUSE_PASSWORD: ${WAREHOUSE_PASSWORD:?Run scripts/prepare_warehouse.py first}
       WAREHOUSE_SSLMODE: ${WAREHOUSE_SSLMODE:-verify-full}
       DATA_AS_OF: ${DATA_AS_OF:-}
+      DEMO_LOGIN_ENABLED: ${DEMO_LOGIN_ENABLED:-true}
       LLM_PROVIDER: ${LLM_PROVIDER:-groq}
       LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-120b}
       GROQ_API_KEY: ${GROQ_API_KEY:-}

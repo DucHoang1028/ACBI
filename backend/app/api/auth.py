@@ -4,7 +4,15 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
-from app.auth.service import allows, login, revoke, rotate, user_for_token
+from app.auth.service import (
+    allows,
+    demo_login,
+    demo_users,
+    login,
+    revoke,
+    rotate,
+    user_for_token,
+)
 
 router = APIRouter(prefix="/api")
 bearer = HTTPBearer(auto_error=False)
@@ -53,6 +61,35 @@ def current_user(
 def sign_in(body: Credentials, request: Request, response: Response) -> dict[str, str]:
     same_origin(request)
     tokens = login(request.app.state.storage, body.username, body.password)
+    if tokens is None:
+        raise invalid()
+    access, refresh = tokens
+    set_refresh(response, refresh, request)
+    return {"access_token": access, "token_type": "bearer"}
+
+
+class DemoAccount(BaseModel):
+    username: str = Field(min_length=1, max_length=80)
+
+
+def demo_enabled(request: Request) -> bool:
+    return bool(request.app.state.settings.demo_login_enabled)
+
+
+@router.get("/auth/demo-users")
+def demo_accounts(request: Request) -> list[dict[str, str]]:
+    """Accounts for one-click sign-in; empty unless the demo switch is on."""
+    return demo_users(request.app.state.storage) if demo_enabled(request) else []
+
+
+@router.post("/auth/demo-login")
+def demo_sign_in(
+    body: DemoAccount, request: Request, response: Response
+) -> dict[str, str]:
+    same_origin(request)
+    if not demo_enabled(request):
+        raise HTTPException(status_code=404, detail="Not found")
+    tokens = demo_login(request.app.state.storage, body.username)
     if tokens is None:
         raise invalid()
     access, refresh = tokens
