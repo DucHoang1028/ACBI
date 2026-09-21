@@ -661,3 +661,26 @@ def test_share_text_uses_vietnamese_number_format() -> None:
     assert text is not None
     assert "3.816.543,33" in text
     assert "31/12/2024" in text
+
+
+def test_chart_type_follows_the_shape_of_the_result() -> None:
+    from app.presentation.visualization import pick_viz
+
+    territories = [{"territory": t, "revenue": str(v)} for t, v in (("A", 5), ("B", 3))]
+    months = [{"month": f"2024-0{m}-01", "revenue": str(m)} for m in range(1, 6)]
+    many = [{"territory": f"T{i}", "revenue": str(i + 1)} for i in range(9)]
+    ratio = [{"factory": f, "defect_rate": "0.1"} for f in ("A", "B", "C")]
+    stacked = [
+        {"month": f"2024-0{m}-01", "territory": t, "revenue": "1"}
+        for m in (1, 2)
+        for t in ("A", "B")
+    ]
+    assert pick_viz([{"revenue": "1"}], "revenue", False).type == "kpi_card"
+    assert pick_viz(territories, "revenue", False).type == "pie"
+    assert pick_viz(territories, "revenue", True).type == "bar"  # a top-N cut
+    assert pick_viz(months, "revenue", False).type == "line"
+    assert pick_viz(many, "revenue", False).type == "bar"
+    assert pick_viz(ratio, "defect_rate", False).type == "bar"
+    assert pick_viz(stacked, "revenue", False).type == "stacked_bar"
+    five = [{"territory": f"T{i}", "revenue": str(i + 1)} for i in range(5)]
+    assert pick_viz(five, "revenue", False).type == "donut"

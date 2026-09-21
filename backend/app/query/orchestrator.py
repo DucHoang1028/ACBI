@@ -1020,7 +1020,12 @@ def answer(
                     result["answer_text"] = f"{result['answer_text']} {note}"
             else:
                 result["viz_config"], result["chart_fallback"] = chart(
-                    body.question, rows, state, budget
+                    body.question,
+                    rows,
+                    state,
+                    budget,
+                    intent.metric_id,
+                    intent.limit < 100,
                 )
             if settings.send_results_to_llm and settings.external_results_enabled:
                 try:

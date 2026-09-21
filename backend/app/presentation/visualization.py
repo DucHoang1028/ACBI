@@ -10,6 +10,7 @@ from app.ai.budget import RequestBudget
 from app.ai.client import FakeLLM
 from app.core.dates import metric_words
 from app.core.text import fold
+from app.metadata import vocabulary
 from app.presentation.charts import TABLE, VizConfig, describe, validate_viz
 
 CHART_WORDS = (
@@ -137,13 +138,65 @@ def reshaped(
     )
 
 
+NOT_A_VALUE = {
+    "sample_count",
+    "ordered_units",
+    "scrapped_units",
+    "current_revenue",
+    "previous_revenue",
+}
+
+
+def pick_viz(
+    rows: list[dict[str, Any]], metric_id: str | None, partial: bool
+) -> VizConfig | None:
+    """The chart that fits the shape of the result, chosen by rule, not by a model.
+
+    One value is a card; a date axis is a line; two groupings are stacked bars; a
+    small whole (not a top-N cut, not a ratio) is a pie or donut; the rest are bars."""
+    if not rows:
+        return None
+    columns = describe(rows)["columns"]
+    shown = [c for c in rows[0] if not c.lower().endswith("id")]
+    values = [
+        c for c in shown if columns[c]["kind"] == "numeric" and c not in NOT_A_VALUE
+    ]
+    labels = [c for c in shown if columns[c]["kind"] in {"category", "temporal"}]
+    if not values:
+        return None
+    try:
+        if len(rows) == 1:
+            return auto_viz("kpi_card", rows)
+        if not labels:
+            return None
+        if len(labels) >= 2 and columns[labels[1]]["kind"] == "category":
+            return auto_viz("stacked_bar", rows)
+        if columns[labels[0]]["kind"] == "temporal":
+            return auto_viz("line" if len(rows) >= 4 else "bar", rows)
+        ratio = metric_id in vocabulary.get().ratio_metrics()
+        if not ratio and not partial and 2 <= len(rows) <= 6:
+            return auto_viz("pie" if len(rows) <= 4 else "donut", rows)
+        return auto_viz("bar", rows)
+    except ValueError:
+        return None
+
+
 def chart(
-    question: str, rows: list[dict[str, Any]], state: Any, budget: RequestBudget
+    question: str,
+    rows: list[dict[str, Any]],
+    state: Any,
+    budget: RequestBudget,
+    metric_id: str | None = None,
+    partial: bool = False,
 ) -> tuple[dict[str, Any], bool]:
     if not state.settings.external_metadata_enabled and not isinstance(
         state.llm, FakeLLM
     ):
         return TABLE.model_dump(), True
+    if not isinstance(state.llm, FakeLLM) and (
+        picked := pick_viz(rows, metric_id, partial)
+    ):
+        return picked.model_dump(), False
     error = None
     for _ in range(state.settings.llm_max_regenerations + 1):
         try:
