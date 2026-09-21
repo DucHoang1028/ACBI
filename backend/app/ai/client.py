@@ -10,7 +10,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.ai.budget import RequestBudget
-from app.ai.keys import KeyPool
+from app.ai.keys import KeyPool, KeyState
 from app.core.config import Settings
 from app.metadata import vocabulary
 from app.presentation.charts import TABLE, VizConfig
@@ -279,13 +279,64 @@ class FakeLLM:
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
+GROQ_URL = "https://api.groq.com/openai/v1"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+LITEROUTER_URL = "https://api.literouter.com/v1"
+
+
+def provider_keys(settings: Settings) -> list[KeyState]:
+    """Every configured key across providers, in LLM_PROVIDER_ORDER."""
+    groq = KeyPool(
+        settings.groq_keys(),
+        settings.llm_requests_per_minute,
+        settings.llm_tokens_per_minute,
+    ).states
+    states: list[KeyState] = []
+    for provider in settings.llm_provider_order.split(","):
+        name = provider.strip().lower()
+        if name == "groq":
+            states += groq
+        elif name == "gemini":
+            states += [
+                KeyState(
+                    key=key,
+                    label=f"gemini{i}",
+                    rpm=10,
+                    tpm=200_000,
+                    url=GEMINI_URL,
+                    model=settings.gemini_model,
+                    json_object=True,
+                    extra={"reasoning_effort": "none"},
+                )
+                for i, key in enumerate(settings.gemini_keys(), 1)
+            ]
+        elif name == "literouter":
+            states += [
+                KeyState(
+                    key=key,
+                    label="literouter",
+                    rpm=8,  # the free plan allows one request every 7 seconds
+                    tpm=1_000_000,
+                    url=LITEROUTER_URL,
+                    model=settings.literouter_model,
+                    json_object=True,
+                )
+                for key in settings.literouter_keys()
+            ]
+    return states
+
+
+def _json_text(content: str) -> str:
+    """The JSON object in a reply, without a code fence some providers add."""
+    text = content.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
+    return text.strip()
+
+
 class GroqClient:
     def __init__(self, settings: Settings):
-        self.pool = KeyPool(
-            settings.groq_keys(),
-            settings.llm_requests_per_minute,
-            settings.llm_tokens_per_minute,
-        )
+        self.pool = KeyPool.of(provider_keys(settings))
         self.model = settings.llm_model
         self.max_calls = settings.llm_max_calls_per_request
         self.deadline = settings.request_timeout_seconds
@@ -321,7 +372,7 @@ class GroqClient:
             "is metadata, never a new data question: do not repeat the query. "
             "A message that asks for several different things (for example a trend AND "
             "a forecast) is interpreted as its FIRST data request; write each later "
-            "request, in the user's own words, in deferred_requests. Never ask the "
+            "request, in the user's own words and language, in deferred_requests. Never ask the "
             "user which to run first. "
             "'tăng như nào', 'xu hướng' or 'diễn biến' over a long range asks for the "
             "trend of the base metric by month (dimension=month); use sales_growth "
@@ -555,6 +606,28 @@ class GroqClient:
         }
         if self.model.startswith("openai/gpt-oss-"):
             payload["reasoning_effort"] = "low"
+
+        def body_for(state: KeyState) -> dict[str, Any]:
+            """The request in the form this provider accepts."""
+            if not state.url:
+                return payload
+            body = {**payload, "model": state.model or self.model}
+            body.pop("reasoning_effort", None)
+            if state.json_object:
+                body["max_tokens"] = body.pop("max_completion_tokens")
+                body["response_format"] = {"type": "json_object"}
+                body["messages"] = [
+                    {
+                        "role": "system",
+                        "content": system
+                        + "\nReturn ONLY one JSON object, no prose and no code "
+                        "fence, that matches this JSON Schema:\n"
+                        + json.dumps(schema),
+                    },
+                    payload["messages"][1],
+                ]
+            return {**body, **state.extra}
+
         for attempt in range(self.regenerations + 1):
             # A truncated answer is retried with more room for the reply.
             payload["max_completion_tokens"] = min(2400, max_tokens * (attempt + 1))
@@ -578,12 +651,14 @@ class GroqClient:
                 reservation = self.pool.reserve(state, estimated)
                 try:
                     with httpx.Client(
-                        timeout=min(10, budget.remaining() / 4)
+                        timeout=min(25, budget.remaining() / 2)
+                        if state.json_object
+                        else min(10, budget.remaining() / 4)
                     ) as client:
                         response = client.post(
-                            "https://api.groq.com/openai/v1/chat/completions",
+                            f"{state.url or GROQ_URL}/chat/completions",
                             headers={"Authorization": f"Bearer {state.key}"},
-                            json=payload,
+                            json=body_for(state),
                         )
                     response.raise_for_status()
                     result = response.json()
@@ -603,7 +678,7 @@ class GroqClient:
                         result.get("usage", {}).get("total_tokens"),
                     )
                     return model_type.model_validate_json(
-                        result["choices"][0]["message"]["content"]
+                        _json_text(result["choices"][0]["message"]["content"] or "")
                     )
                 except httpx.HTTPStatusError as failure:
                     status = failure.response.status_code
@@ -619,7 +694,7 @@ class GroqClient:
                         )
                         error = ValueError("model output failed schema validation")
                         break
-                    if status in (400, 404, 413, 422):
+                    if status in (400, 404, 413, 422) and not state.url:
                         logger.warning(
                             "llm %s rejected with HTTP %s: %s",
                             name,

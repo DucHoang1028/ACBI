@@ -715,3 +715,35 @@ def test_factory_named_beside_a_revenue_request_is_not_unknown() -> None:
         raw, None, "Doanh thu của Canada năm 2024 và sản lượng Factory B tháng trước"
     )
     assert not resolved.needs_clarification
+
+
+def test_why_and_growth_wording_is_recognised() -> None:
+    import re
+
+    from app.core.dates import GROWTH, WHY
+    from app.core.text import fold
+
+    assert re.search(WHY, fold("Nhà máy nào cao nhất và tại sao?"))
+    assert re.search(GROWTH, fold("So với tháng trước thì tháng này tăng bao nhiêu"))
+    assert not re.search(WHY, fold("Doanh thu năm 2024"))
+
+
+def test_model_end_on_the_last_day_of_a_quarter_is_closed() -> None:
+    raw = intent(
+        period="explicit",
+        start_date="2025-01-01",
+        end_date="2025-03-31",
+        needs_clarification=False,
+        clarification_question=None,
+        missing_fields=[],
+    )
+    resolved = merged_intent(raw, None, "Còn Q1?")
+    assert resolved.end_date == "2025-04-01"
+
+
+def test_quarter_written_q2_with_a_year_is_anchored() -> None:
+    assert date_hints("Doanh thu Q2 2025") == {
+        "period": "explicit",
+        "start_date": "2025-04-01",
+        "end_date": "2025-07-01",
+    }

@@ -16,7 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.ai.budget import RequestBudget
-from app.ai.client import FakeLLM, Intent, LLMBusy
+from app.ai.client import FakeLLM, Intent, LLMBusy, dimension_ids
 from app.conversation.dialogue import fallback, last_answer, reply_from_metadata
 from app.conversation.intent import (
     chosen_option,
@@ -35,6 +35,8 @@ from app.conversation.service import (
     save_context,
 )
 from app.core.dates import (
+    GROWTH,
+    WHY,
     compares_two_periods,
     date_hints,
     is_share_question,
@@ -222,6 +224,8 @@ def note_deferred(result: dict[str, Any], raw: Intent, language: str) -> None:
     if not raw.deferred_requests or result.get("status") not in {"ok", "no_data"}:
         return
     listed = "; ".join(raw.deferred_requests)
+    for metric in vocabulary.get().metrics.values():  # ids are not for people
+        listed = listed.replace(metric.id, metric.label(language).lower())
     note = (
         f"Tôi đã thực hiện yêu cầu đầu tiên. Chưa thực hiện: {listed}. "
         "Hãy hỏi tiếp để tôi làm."
@@ -845,12 +849,59 @@ def answer(
                 else "Growth against the previous period exists only for the latest "
                 "month or quarter, so this is revenue by month to show the trend."
             )
+        by_quarter = re.search(
+            r"\b(?:theo|by|moi|hang|each|per)\s+(?:quy|quarter)\b", fold(body.question)
+        )
+        if by_quarter and (
+            intent.dimension not in dimension_ids()
+            or intent.series_dimension not in dimension_ids()
+            or intent.dimension == "none"
+        ):
+            intent = intent.model_copy(
+                update={"dimension": "month", "series_dimension": "none"}
+            )
+        if by_quarter and intent.dimension == "month":
+            growth_note = (
+                "Chưa chia theo quý được nên đây là kết quả theo tháng."
+                if body.language == "vi"
+                else "Quarterly breakdown is not available, so this is by month."
+            )
+        if re.search(WHY, fold(body.question)):
+            reason = (
+                "Tôi chỉ đưa ra số liệu, chưa giải thích được nguyên nhân."
+                if body.language == "vi"
+                else "I can give the figures but not explain the reasons."
+            )
+            growth_note = f"{growth_note} {reason}" if growth_note else reason
         if intent.dimension in {"day", "week", "month"} and intent.limit < 250:
             # Rows come in date order: "the highest month" cannot be cut to one row.
             intent = intent.model_copy(update={"limit": 250})
         if intent.series_dimension != "none" and intent.limit < 250:
             # A stacked chart needs every group: the default cap would cut it short.
             intent = intent.model_copy(update={"limit": 250})
+        if re.search(GROWTH, fold(body.question)) and intent.metric_id not in {
+            "revenue",
+            "sales_growth",
+            None,
+        }:
+            outcome = "needs_clarification"
+            question = (
+                "So sánh với kỳ trước chỉ có cho doanh thu. Với chỉ số này hãy hỏi "
+                "từng kỳ, ví dụ “tháng này” rồi “tháng trước”."
+                if body.language == "vi"
+                else "Comparison with the previous period exists only for revenue. "
+                "For this metric ask each period, for example “this month” and "
+                "then “last month”."
+            )
+            save_context(
+                storage,
+                conversation_id,
+                user["id"],
+                carry_slots(prior, intent),
+                question,
+                next_turns(prior, body.question, question),
+            )
+            return 200, response(outcome, question, request_id, conversation_id)
         metric_id = intent.metric_id
         share_of: list[str] | None = None
         if intent.territory and is_share_question(body.question):

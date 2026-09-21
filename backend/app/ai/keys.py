@@ -21,6 +21,11 @@ class KeyState:
     tpm: int
     calls: deque[list[float]] = field(default_factory=deque)
     rest_until: float = 0.0
+    # Provider details; an empty url means Groq with the client's own model.
+    url: str = ""
+    model: str = ""
+    json_object: bool = False  # no strict schemas: the schema goes in the prompt
+    extra: dict[str, object] = field(default_factory=dict)
 
 
 class KeyPool:
@@ -32,6 +37,13 @@ class KeyPool:
         ]
         self.current = 0
         self.lock = threading.Lock()
+
+    @classmethod
+    def of(cls, states: list[KeyState]) -> "KeyPool":
+        """A pool over ready-made keys, e.g. several providers in one order."""
+        pool = cls([], 1, 1)
+        pool.states = states
+        return pool
 
     def __len__(self) -> int:
         return len(self.states)

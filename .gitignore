@@ -18,3 +18,5 @@ data/eval/results.local.json
 *.key
 *.pem
 deploy/certs/
+
+deploy/llm-providers.local

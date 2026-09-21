@@ -141,3 +141,24 @@ def test_wait_time_says_when_a_busy_key_has_room_again() -> None:
     pool.failed(pool.states[0], 429, 5.0)
     assert 55 < pool.wait_time(100) <= 60
     assert pool.wait_time(5000) == float("inf")  # can never fit
+
+
+def test_providers_are_ordered_and_named_by_settings() -> None:
+    from app.ai.client import GEMINI_URL, LITEROUTER_URL, provider_keys
+
+    common = {"_env_file": None, "warehouse_password": "x", "app_db_password": "x"}
+    settings = Settings(
+        groq_api_key="g1",
+        groq_api_keys="g2",
+        gemini_api_keys="m1,m2",
+        literouter_api_key="l1",
+        llm_provider_order="gemini,groq,literouter",
+        **common,
+    )
+    states = provider_keys(settings)
+    assert [s.key for s in states] == ["m1", "m2", "g1", "g2", "l1"]
+    assert states[0].url == GEMINI_URL and states[0].json_object
+    assert states[2].url == "" and not states[2].json_object
+    assert states[4].url == LITEROUTER_URL
+    groq_only = Settings(groq_api_key="g1", **common)
+    assert [s.key for s in provider_keys(groq_only)] == ["g1"]

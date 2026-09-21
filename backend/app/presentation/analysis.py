@@ -8,7 +8,7 @@ import re
 from decimal import Decimal
 from typing import Any
 
-from app.core.dates import date_hints
+from app.core.dates import GROWTH, date_hints
 from app.core.text import fold
 from app.metadata import vocabulary
 from app.presentation.charts import describe, number
@@ -58,22 +58,22 @@ def fresh_request(question: str, rows: list[dict[str, Any]], metric: str) -> boo
         names_new_member(question, rows)
         or asks_other_unit(question, rows, metric)
         or date_hints(question)
+        or re.search(GROWTH, value)  # growth is not readable from a table on screen
         or re.search(r"\d", value)
     )
 
 
 def asks_other_unit(question: str, rows: list[dict[str, Any]], metric: str) -> bool:
-    """Asking which month over a table of territories is a new question."""
+    """Naming a breakdown the table on screen is not split by is a new question.
+
+    "Tháng nào cao nhất?" over a table of territories, or "khu vực thấp nhất" over
+    a table of months, asks for other figures than the ones shown."""
     cols = columns(rows, metric)
     if cols is None:
         return False
-    value = fold(question)
-    by_month = cols[0] == "month"
-    if re.search(r"\b(?:thang nao|which month)\b", value):
-        return not by_month
-    if re.search(r"\b(?:nuoc nao|khu vuc nao|which (?:territory|country))\b", value):
-        return by_month
-    return False
+    label = cols[0].lower()
+    named = vocabulary.get().match_dimensions(fold(question))
+    return bool(named) and not any(label in d or d in label for d in named)
 
 
 def columns(rows: list[dict[str, Any]], metric: str) -> tuple[str, str] | None:

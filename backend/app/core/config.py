@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     groq_api_key: SecretStr = SecretStr("")
     # Extra keys, comma-separated. Used in order; an error moves to the next key.
     groq_api_keys: SecretStr = SecretStr("")
+    # Other OpenAI-compatible providers, tried in LLM_PROVIDER_ORDER; a provider
+    # with no key is skipped. Keys are comma-separated.
+    llm_provider_order: str = "gemini,groq,literouter"
+    gemini_api_keys: SecretStr = SecretStr("")
+    gemini_model: str = "gemini-2.5-flash"
+    literouter_api_key: SecretStr = SecretStr("")
+    literouter_model: str = "deepseek-v3.2:free"
     stt_model: str = "whisper-large-v3-turbo"
     llm_requests_per_minute: int = Field(default=15, ge=1)
     llm_tokens_per_minute: int = Field(default=8000, ge=1)
@@ -53,6 +60,14 @@ class Settings(BaseSettings):
         if value != "acbi_ro":
             raise ValueError("Warehouse connections must use acbi_ro")
         return value
+
+    def gemini_keys(self) -> list[str]:
+        raw = self.gemini_api_keys.get_secret_value().split(",")
+        return list(dict.fromkeys(k.strip() for k in raw if k.strip()))
+
+    def literouter_keys(self) -> list[str]:
+        key = self.literouter_api_key.get_secret_value().strip()
+        return [key] if key else []
 
     def groq_keys(self) -> list[str]:
         """Every configured Groq key, primary first, without duplicates."""

@@ -8,6 +8,7 @@ warehouse, never from this file.
 """
 
 import re
+from datetime import date, timedelta
 from typing import Any
 
 from app.ai.client import Intent
@@ -39,7 +40,7 @@ def is_standalone(question: str, hints: dict[str, object]) -> bool:
     value = fold(question)
     named_period = bool(hints.get("period") or hints.get("start_date"))
     return (
-        bool(hints.get("metric_id"))
+        bool(vocabulary.get().match_metrics(value))  # one metric, or several
         and named_period
         and not re.search(FOLLOW_UP, value)
         and not value.startswith(("chi ", "only "))
@@ -71,6 +72,21 @@ def says_something(
         or vocab.match_members(value)
         or vocab.match_dimensions(value)
     )
+
+
+def _close_end(current: dict[str, Any]) -> None:
+    """A model that ends a month or quarter on its last day left that day out.
+
+    Dates are half-open, so a range from a first of the month that ends on the last
+    day of a month is read as ending the day after: 01-01 to 03-31 is all of Q1."""
+    try:
+        start = date.fromisoformat(str(current.get("start_date")))
+        end = date.fromisoformat(str(current.get("end_date")))
+    except ValueError:
+        return
+    if current.get("period") == "explicit" and start.day == 1 and end.day != 1:
+        if (end + timedelta(days=1)).day == 1:
+            current["end_date"] = (end + timedelta(days=1)).isoformat()
 
 
 def drop_inherited(
@@ -176,9 +192,11 @@ def merged_intent(
         if "factory" not in metric.dimensions and not intent.factory_id:
             current["factory_id"] = None
     kept = str(slots.get("dimension"))
-    splits = not metric or kept in metric.dimensions
-    grain = kept in {"day", "week", "month"} and "date" in metric.dimensions
-    splits = splits or grain
+    splits = (
+        metric is None
+        or kept in metric.dimensions
+        or (kept in {"day", "week", "month"} and "date" in metric.dimensions)
+    )
     if (
         not standalone
         and current["dimension"] == "none"
@@ -186,6 +204,7 @@ def merged_intent(
         and splits
     ):
         current["dimension"] = slots["dimension"]
+    _close_end(current)
     if current["period"] == "explicit" and not hints and intent.period is None:
         for field in ("start_date", "end_date"):
             if current[field] is None:

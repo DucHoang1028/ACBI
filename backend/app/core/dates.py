@@ -9,7 +9,7 @@ from app.metadata import vocabulary
 
 def date_hints(question: str) -> dict[str, str | None]:
     """Resolve only unambiguous calendar wording; leave comparisons to the model."""
-    value = fold(question)
+    value = re.sub(r"\bq([1-4])\b", r"quy \1", fold(question))  # Q2 reads as quý 2
     # "from 2022 until now" is a range the backend cannot close without the
     # anchor: the model resolves it against context.data_as_of.
     if re.search(r"\b(?:den nay|toi nay|den gio|to now|until now|to date)\b", value):
@@ -36,8 +36,8 @@ def date_hints(question: str) -> dict[str, str | None]:
     comparing = re.search(r"\b(?:so sanh|so voi|compare|vs)\b", value)
     month = quarter = None
     if not comparing and len(month_mentions) + len(quarter_mentions) == 1:
-        month = re.search(r"\bthang\s+(\d{1,2})\s*(?:nam\s+|/)(\d{4})\b", value)
-        quarter = re.search(r"\bquy\s+([1-4])\s*(?:nam\s+|/)(\d{4})\b", value)
+        month = re.search(r"\bthang\s+(\d{1,2})\s*(?:nam\s+|/|\s)(\d{4})\b", value)
+        quarter = re.search(r"\bquy\s+([1-4])\s*(?:nam\s+|/|\s)(\d{4})\b", value)
     if month or quarter:
         match = month or quarter
         assert match is not None
@@ -72,9 +72,11 @@ def date_hints(question: str) -> dict[str, str | None]:
 
 SHARE = r"phan tram|chiem bao nhieu|ty trong|share|percent"
 STACK = r"\b(?:xep chong|cot chong|stacked)\b"
+WHY = r"\b(?:tai sao|vi sao|nguyen nhan|why)\b"
 GROWTH = (
-    r"\b(?:tang truong|growth|(?:tang|giam) bao nhieu"
-    r"|so voi (?:thang|quy|ky) (?:lien )?truoc)\b"
+    r"\b(?:tang truong|growth|grew|(?:tang|giam) bao nhieu"
+    r"|so voi (?:thang|quy|ky) (?:lien )?truoc"
+    r"|compared (?:to|with) the previous (?:month|quarter|period))\b"
 )
 
 

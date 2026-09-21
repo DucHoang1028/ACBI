@@ -19,6 +19,10 @@ services:
     build:
       context: ..
       dockerfile: backend/Dockerfile
+    # Gemini and LiteRouter keys (GEMINI_API_KEYS, LITEROUTER_API_KEY); optional.
+    env_file:
+      - path: llm-providers.local
+        required: false
     environment:
       APP_DB_HOST: acbi-app-db
       APP_DB_USER: ${APP_DB_USER:-acbi_app}
