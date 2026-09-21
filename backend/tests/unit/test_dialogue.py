@@ -134,3 +134,11 @@ def test_a_question_about_the_previous_answer_gets_it_as_a_reference() -> None:
         }
     )
     assert predicted and "recent_average" in predicted["text"]
+
+
+def test_dimension_ids_are_replaced_by_their_names_in_replies() -> None:
+    llm = FakeLLM({})
+    llm.replies["x"] = "Chiều Khu vực bán hàng (sales_territory) có 10 khu vực."
+    budget = RequestBudget(30, 3)
+    text = reply_from_metadata(llm, "x", "manager", "answer", "2025-06-29", budget)
+    assert text is not None and "sales_territory" not in text

@@ -151,6 +151,7 @@ def test_providers_are_ordered_and_named_by_settings() -> None:
         groq_api_key="g1",
         groq_api_keys="g2",
         gemini_api_keys="m1,m2",
+        gemini_model="model-a",
         literouter_api_key="l1",
         llm_provider_order="gemini,groq,literouter",
         **common,
@@ -162,3 +163,41 @@ def test_providers_are_ordered_and_named_by_settings() -> None:
     assert states[4].url == LITEROUTER_URL
     groq_only = Settings(groq_api_key="g1", **common)
     assert [s.key for s in provider_keys(groq_only)] == ["g1"]
+
+
+def test_several_gemini_models_multiply_the_keys() -> None:
+    from app.ai.client import provider_keys
+
+    settings = Settings(
+        _env_file=None,
+        warehouse_password="x",
+        app_db_password="x",
+        gemini_api_keys="m1,m2",
+        gemini_model="new,old",
+        llm_provider_order="gemini",
+    )
+    states = provider_keys(settings)
+    assert [(s.key, s.model) for s in states] == [
+        ("m1", "new"),
+        ("m2", "new"),
+        ("m1", "old"),
+        ("m2", "old"),
+    ]
+
+
+def test_invented_fields_are_dropped_for_providers_without_strict_schemas() -> None:
+    from app.ai.client import SummaryProposal, _known_fields
+
+    kept = _known_fields(SummaryProposal, '{"text": "ok", "type": "extra"}')
+    assert SummaryProposal.model_validate_json(kept).text == "ok"
+    assert _known_fields(SummaryProposal, "not json") == "not json"
+
+
+def test_a_key_with_a_gap_is_not_offered_again_until_the_gap_has_passed() -> None:
+    from app.ai.keys import KeyPool, KeyState
+
+    pool = KeyPool.of([KeyState(key="l1", label="l1", rpm=8, tpm=10**6, gap=7.0)])
+    assert pool.available(100)
+    pool.reserve(pool.states[0], 100)
+    assert pool.available(100) == []
+    assert 6.0 < pool.wait_time(100) <= 7.0

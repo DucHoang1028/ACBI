@@ -58,8 +58,13 @@ def requested_chart(question: str) -> str | None:
 
 def reshape_kind(question: str) -> str | None:
     """A pure display request, such as 'show that as a pie chart'."""
-    if re.search(metric_words(), fold(question)):
+    value = fold(question)
+    if re.search(metric_words(), value):
         return None
+    if vocabulary.get().match_members(value) or re.search(
+        r"\b(?:so sanh|compare|nam ngoai|thang truoc|quy truoc|nam \d{4})\b", value
+    ):
+        return None  # it names something to fetch: a new question, not a redraw
     return requested_chart(question)
 
 

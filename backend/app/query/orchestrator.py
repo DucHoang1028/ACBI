@@ -15,12 +15,15 @@ from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.ai.budget import RequestBudget
+from app.ai.budget import BudgetExceeded, RequestBudget
 from app.ai.client import FakeLLM, Intent, LLMBusy, dimension_ids
 from app.conversation.dialogue import fallback, last_answer, reply_from_metadata
 from app.conversation.intent import (
+    WHICH,
     chosen_option,
     clarification_text,
+    first_metric,
+    further_requests,
     local_intent,
     merged_intent,
     next_deferred,
@@ -81,6 +84,7 @@ from app.query.validation import (
 
 logger = logging.getLogger("acbi.chat")
 BUSY_MESSAGE = "AI service is busy"
+DATA_KINDS = {"metric_query", "comparison", "trend", "ranking", "needs_clarification"}
 
 
 def run_query(
@@ -216,7 +220,21 @@ def carry_slots(prior: dict[str, Any] | None, intent: Intent) -> dict[str, Any]:
         ):
             continue
         slots[name] = value
+    if intent.dimension == "factory":  # "which factory ...": every factory, no filter
+        slots.pop("factory_id", None)
+    if intent.dimension == "sales_territory":
+        slots.pop("territory", None)
     return slots
+
+
+def shown_members(rows: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """Territories and factories on screen, so "those regions" can be resolved."""
+    shown: dict[str, list[str]] = {}
+    for key in ("territory", "factory"):
+        names = [str(r[key]) for r in rows if r.get(key)]
+        if 1 < len(names) <= 10:
+            shown[key] = names
+    return shown
 
 
 def note_deferred(result: dict[str, Any], raw: Intent, language: str) -> None:
@@ -670,6 +688,12 @@ def answer(
                 return 200, response(outcome, message, request_id, conversation_id)
             previous = latest["payload"]
             viz, note = reshaped(target, previous["table"], body.language)
+            asked = analysis_kind(body.question)  # "which is highest, draw a pie"
+            if asked and latest["metric_id"] in vocabulary.get().metrics:
+                reading = analyze(
+                    asked, previous["table"], latest["metric_id"], body.language
+                )
+                note = f"{reading} {note}" if reading else note
             result = response("ok", "Results found", request_id, conversation_id)
             result.update(
                 table=previous["table"],
@@ -739,6 +763,21 @@ def answer(
         ) or client.interpret(asked, context, budget)
         if later:
             raw = raw.model_copy(update={"deferred_requests": waiting})
+        elif not raw.deferred_requests:
+            extra = further_requests(body.question)
+            if extra:  # the model ran the first task and forgot to list the rest
+                update: dict[str, Any] = {"deferred_requests": extra}
+                if raw.intent_type in DATA_KINDS and (
+                    raw.metric_id is None or "metric_id" in raw.missing_fields
+                ):
+                    # It asked "which metric?" though the first task is plain.
+                    update.update(
+                        metric_id=first_metric(body.question),
+                        needs_clarification=False,
+                        clarification_question=None,
+                        missing_fields=[],
+                    )
+                raw = raw.model_copy(update=update)
         raw = resume_pending(raw, prior)
         if raw.intent_type in {"chat", "metadata", "unsupported"}:
             outcome, result = run_dialogue(
@@ -873,6 +912,9 @@ def answer(
                 else "I can give the figures but not explain the reasons."
             )
             growth_note = f"{growth_note} {reason}" if growth_note else reason
+        if WHICH.search(fold(body.question)) and intent.dimension != "none":
+            # "Which factory is best?" shows every factory so the answer can be checked.
+            intent = intent.model_copy(update={"limit": max(intent.limit, 100)})
         if intent.dimension in {"day", "week", "month"} and intent.limit < 250:
             # Rows come in date order: "the highest month" cannot be cut to one row.
             intent = intent.model_copy(update={"limit": 250})
@@ -1026,7 +1068,7 @@ def answer(
             storage,
             conversation_id,
             user["id"],
-            intent.model_dump(),
+            {**intent.model_dump(), "shown": shown_members(rows)},
             None,
             next_turns(prior, body.question, None),
         )
@@ -1112,6 +1154,32 @@ def answer(
         return 200, result
     except HTTPException:
         raise
+    except BudgetExceeded:
+        logger.warning("Request %s: model call budget spent", request_id)
+        outcome = "needs_clarification"
+        # Keep the conversation: the next message continues it.
+        earlier = locals().get("prior") or {}
+        try:
+            save_context(
+                storage,
+                conversation_id,
+                user["id"],
+                earlier.get("slots") or {},
+                None,
+                earlier.get("turns") or [],
+            )
+        except SQLAlchemyError:
+            logger.warning("Request %s: context not saved", request_id)
+        return 200, response(
+            outcome,
+            "Tôi chưa hiểu rõ câu hỏi này sau nhiều lần thử. Hãy diễn đạt lại ngắn "
+            "gọn hơn, gồm chỉ số, khoảng thời gian và cách chia nhóm."
+            if body.language == "vi"
+            else "I could not make sense of this after several tries. Please rephrase "
+            "it briefly with the metric, the period and the breakdown.",
+            request_id,
+            conversation_id,
+        )
     except LLMBusy:
         logger.warning("Request %s: AI provider rate limited", request_id)
         return 503, response(

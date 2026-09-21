@@ -29,7 +29,8 @@ class Settings(BaseSettings):
     # with no key is skipped. Keys are comma-separated.
     llm_provider_order: str = "gemini,groq,literouter"
     gemini_api_keys: SecretStr = SecretStr("")
-    gemini_model: str = "gemini-2.5-flash"  # a key it is closed to rests for an hour
+    # Comma-separated, tried in order. A key a model is closed to rests for an hour.
+    gemini_model: str = "gemini-3.6-flash,gemini-2.5-flash"
     literouter_api_key: SecretStr = SecretStr("")
     literouter_model: str = "deepseek-v3.2:free"
     # Demo only: one-click sign-in without a password (see /api/auth/demo-login).
@@ -68,8 +69,8 @@ class Settings(BaseSettings):
         return list(dict.fromkeys(k.strip() for k in raw if k.strip()))
 
     def literouter_keys(self) -> list[str]:
-        key = self.literouter_api_key.get_secret_value().strip()
-        return [key] if key else []
+        raw = self.literouter_api_key.get_secret_value().split(",")
+        return list(dict.fromkeys(k.strip() for k in raw if k.strip()))
 
     def groq_keys(self) -> list[str]:
         """Every configured Groq key, primary first, without duplicates."""

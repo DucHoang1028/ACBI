@@ -747,3 +747,119 @@ def test_quarter_written_q2_with_a_year_is_anchored() -> None:
         "start_date": "2025-04-01",
         "end_date": "2025-07-01",
     }
+
+
+def test_redraw_requests_and_new_questions_are_told_apart() -> None:
+    from app.presentation.visualization import reshape_kind
+
+    assert reshape_kind("vẽ tròn cho dễ nhìn") == "pie"
+    assert reshape_kind("so sánh Đức với Pháp năm ngoái rồi vẽ biểu đồ tròn") is None
+    assert reshape_kind("đổi sang biểu đồ cột cho Canada") is None
+
+
+def test_which_factory_question_drops_the_factory_filter() -> None:
+    prior = {"slots": intent(metric_id="production_output", factory_id=2).model_dump()}
+    raw = intent(
+        metric_id="production_output",
+        factory_id=2,
+        needs_clarification=False,
+        clarification_question=None,
+        missing_fields=[],
+        period="last_month",
+    )
+    question = "nhà máy nào có sản lượng thấp nhất tháng trước"
+    resolved = merged_intent(raw, prior, question)
+    assert resolved.factory_id is None
+    assert resolved.dimension == "factory"
+
+
+def test_a_vague_quality_question_asks_for_the_measure() -> None:
+    raw = intent(
+        metric_id="production_output",
+        period="last_year",
+        needs_clarification=False,
+        clarification_question=None,
+        missing_fields=[],
+    )
+    resolved = merged_intent(raw, None, "nhà máy nào làm ăn tệ nhất?")
+    assert resolved.needs_clarification and resolved.metric_id is None
+
+
+def test_a_factory_is_not_missing_from_a_revenue_request() -> None:
+    raw = intent(period="last_month", missing_fields=["factory_id"])
+    resolved = merged_intent(raw, None, "doanh thu tháng trước, sản lượng Factory B")
+    assert "factory_id" not in resolved.missing_fields
+
+
+def test_later_tasks_of_a_multi_metric_message_are_listed() -> None:
+    from app.conversation.intent import further_requests
+
+    question = (
+        "Cho mình doanh thu tháng trước của Canada, sản lượng Factory B cùng kỳ, "
+        "và tỷ lệ phế phẩm luôn nhé"
+    )
+    later = further_requests(question)
+    assert len(later) == 2
+    assert "sản lượng" in later[0] and "phế phẩm" in later[1]
+    assert further_requests("Doanh thu tháng trước của Canada") == []
+
+
+def test_named_territory_without_a_metric_means_revenue() -> None:
+    earlier = intent(metric_id="production_output", period="last_year")
+    prior = {"slots": earlier.model_dump()}
+    raw = intent(
+        metric_id="production_output",
+        territory="Germany|France",
+        period="last_year",
+        needs_clarification=False,
+        clarification_question=None,
+        missing_fields=[],
+    )
+    resolved = merged_intent(raw, prior, "so sánh Đức với Pháp năm ngoái")
+    assert resolved.metric_id == "revenue"
+
+
+def test_those_regions_means_the_territories_last_shown() -> None:
+    shown = {"territory": ["Southwest", "Northwest", "Australia"]}
+    prior = {
+        "slots": {**intent(dimension="sales_territory").model_dump(), "shown": shown}
+    }
+    raw = intent(
+        metric_id="sales_growth",
+        dimension="sales_territory",
+        period="last_quarter",
+        needs_clarification=False,
+        clarification_question=None,
+        missing_fields=[],
+    )
+    question = "thêm tăng trưởng so với quý trước của từng khu vực đó"
+    resolved = merged_intent(raw, prior, question)
+    assert set((resolved.territory or "").split("|")) == set(shown["territory"])
+    assert resolved.limit == 100
+
+
+def test_shown_members_are_kept_for_territories_and_factories() -> None:
+    from app.query.orchestrator import shown_members
+
+    rows = [{"territory": "A", "revenue": 1}, {"territory": "B", "revenue": 2}]
+    assert shown_members(rows) == {"territory": ["A", "B"]}
+    assert shown_members([{"revenue": 1}]) == {}
+
+
+def test_a_later_still_clause_does_not_make_the_message_a_follow_up() -> None:
+    prior = {
+        "slots": intent(
+            dimension="sales_territory", limit=3, period="last_quarter"
+        ).model_dump()
+    }
+    raw = intent(
+        dimension="sales_territory",
+        limit=3,
+        period="this_month",
+        needs_clarification=False,
+        clarification_question=None,
+        missing_fields=[],
+    )
+    question = "Doanh thu tháng này bao nhiêu, còn tháng trước thì sao"
+    resolved = merged_intent(raw, prior, question)
+    assert resolved.dimension == "none" and resolved.limit == 100

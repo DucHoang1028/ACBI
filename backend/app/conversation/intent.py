@@ -33,17 +33,25 @@ FOLLOW_UP = (
 )
 
 
+RELATIVE_PERIOD = (
+    r"\b(?:(?:thang|quy|nam|tuan)\s+(?:nay|truoc)|hom nay|hom qua|"
+    r"(?:this|last)\s+(?:month|quarter|year|week))\b"
+)
+
+
 def is_standalone(question: str, hints: dict[str, object]) -> bool:
     """True when the question names its own metric and period and leans on nothing.
 
     "Doanh thu năm 2024" asked after a France-versus-Germany answer is a new
     question: territory, factory and breakdown of the earlier turn must not leak in."""
     value = fold(question)
-    named_period = bool(hints.get("period") or hints.get("start_date"))
+    named_period = bool(hints.get("period") or hints.get("start_date")) or bool(
+        re.search(RELATIVE_PERIOD, value)  # two periods in one message leave no hint
+    )
     return (
         bool(vocabulary.get().match_metrics(value))  # one metric, or several
         and named_period
-        and not re.search(FOLLOW_UP, value)
+        and not re.search(FOLLOW_UP, CLAUSE.split(value)[0])  # a later "còn ..." is ok
         and not value.startswith(("chi ", "only "))
     )
 
@@ -108,6 +116,56 @@ def drop_inherited(
             continue
         if current.get(key) == slots[key]:
             current[key] = "none" if key == "dimension" else None
+    same_limit = current.get("limit") == slots.get("limit") != 100
+    if same_limit and not re.search(r"\d", value):
+        current["limit"] = 100  # an earlier "top 3" is not asked again
+
+
+EVALUATIVE = re.compile(
+    r"\b(?:te nhat|kem nhat|tot nhat|lam an|hieu qua|hieu suat|performance|"
+    r"best|worst|underperform\w*)\b"
+)
+WHICH = re.compile(r"\b((?:[a-z]+\s){1,2})nao\b|\bwhich\s+((?:[a-z]+\s?){1,2})")
+
+
+def _which_dimension(current: dict[str, Any], intent: Intent, question: str) -> None:
+    """"Nhà máy nào ...?" asks about every factory: no factory filter, split by it."""
+    value = fold(question)
+    match = WHICH.search(value)
+    if not match:
+        return
+    named = vocabulary.get().match_dimensions(match.group(1) or match.group(2) or "")
+    if not named or named[0] in {"month", "week", "day"}:
+        return
+    dimension = named[0]
+    if dimension == "factory" and intent.factory_id is None:
+        current["factory_id"] = None
+    if dimension == "sales_territory" and not intent.territory:
+        current["territory"] = None
+    if current["dimension"] == "none":
+        current["dimension"] = dimension
+
+
+def _those_members(
+    current: dict[str, Any], slots: dict[str, Any], intent: Intent, question: str
+) -> None:
+    """Growth for those regions: what the last answer showed on screen."""
+    value = fold(question)
+    if not re.search(
+        r"\b(?:khu vuc|nuoc|nha may|region|territor\w*|factor\w*)\s+(?:do|nay|kia)\b|"
+        r"\b(?:those|these|them)\b",
+        value,
+    ):
+        return
+    shown = slots.get("shown") or {}
+    if shown.get("territory") and not intent.territory:
+        current["territory"] = "|".join(dict.fromkeys(shown["territory"]))
+        if current["dimension"] == "none":
+            current["dimension"] = "sales_territory"
+        current["limit"] = 100
+    elif shown.get("factory") and intent.factory_id is None:
+        current["dimension"] = "factory"
+        current["limit"] = 100
 
 
 def merged_intent(
@@ -132,6 +190,20 @@ def merged_intent(
                 "missing_fields": ["metric_id"],
             }
         )
+    _which_dimension(current, intent, question)
+    _those_members(current, slots, intent, question)
+    if EVALUATIVE.search(fold(question)) and not vocabulary.get().match_metrics(
+        fold(question)
+    ):
+        # "Which factory is doing worst?" does not say by which measure.
+        current.update(
+            needs_clarification=True,
+            metric_id=None,
+            period=None,
+            clarification_question=None,
+            missing_fields=["metric_id"],
+        )
+        return Intent.model_validate(current)
     adds_information = bool(
         hints
         or intent.metric_id
@@ -186,6 +258,15 @@ def merged_intent(
             continue
         if current[field] is None:
             current[field] = slots.get(field)
+    named_metric = bool(vocabulary.get().match_metrics(fold(question)))
+    kept = vocabulary.get().metrics.get(str(current["metric_id"]))
+    if (
+        hints.get("territory")
+        and not named_metric
+        and kept is not None
+        and "sales_territory" not in kept.dimensions
+    ):
+        current["metric_id"] = "revenue"  # only sales figures split by territory
     metric = vocabulary.get().metrics.get(str(current.get("metric_id")))
     if metric and not hints.get("territory") and not intent.territory:
         # A territory kept from a revenue answer means nothing for production.
@@ -211,7 +292,21 @@ def merged_intent(
         for field in ("start_date", "end_date"):
             if current[field] is None:
                 current[field] = slots.get(field)
-    missing = current["missing_fields"]
+    missing = [
+        field
+        for field in current["missing_fields"]
+        if not (
+            metric
+            and (
+                (field == "factory_id" and "factory" not in metric.dimensions)
+                or (field == "territory" and "sales_territory" not in metric.dimensions)
+            )
+        )
+    ]  # a factory is not missing from a revenue request
+    if missing != current["missing_fields"] and not missing:
+        current["needs_clarification"] = False
+        current["clarification_question"] = None
+    current["missing_fields"] = missing
     if missing and "request" not in missing:
         unresolved = [
             field
@@ -464,6 +559,14 @@ def clarification_text(intent: Intent, language: str) -> str:
             if vi
             else f"I do not recognise that territory. Available territories: {names}."
         )
+    if intent.metric_id and intent.period == "recently":
+        return (
+            "“Gần đây” chưa đủ rõ để tôi chọn kỳ. Bạn muốn tháng này, tháng trước, "
+            "quý trước, năm 2024 hay một khoảng ngày cụ thể?"
+            if vi
+            else "“Recently” is too loose for me to pick a period. Do you want this "
+            "month, last month, last quarter, 2024, or an exact date range?"
+        )
     if intent.clarification_question:
         return intent.clarification_question
     if not intent.metric_id:
@@ -486,3 +589,43 @@ def clarification_text(intent: Intent, language: str) -> str:
         if vi
         else "One more detail is needed to answer this question."
     )
+
+
+SPLIT = re.compile(
+    r",|;|\bvà\b|\brồi\b|\bluôn\b|\bsau đó\b|\bnữa\b|\band\b|\bthen\b"
+)
+CLAUSE = re.compile(r",|;|\bva\b|\broi\b|\bluon\b|\bsau do\b|\bnua\b|\band\b|\bthen\b")
+
+
+def further_requests(question: str) -> list[str]:
+    """Later tasks of a message that names several metrics, in the user's own words.
+
+    The model is asked to list them; when it does not, the clauses that name another
+    metric than the first one are kept so none is dropped without a word."""
+    vocab = vocabulary.get()
+    parts = [p.strip(" .?!") for p in CLAUSE.split(fold(question)) if p.strip()]
+    originals = SPLIT.split(question)
+    originals = [o.strip(" .?!") for o in originals if o.strip()]
+    if len(parts) != len(originals):
+        return []
+    first: set[str] = set()
+    for part in parts:
+        if found := set(vocab.match_metrics(part)):
+            first = found
+            break
+    later = [
+        original
+        for part, original in zip(parts, originals)
+        if (found := set(vocab.match_metrics(part))) and found != first
+    ]
+    return later[:4]
+
+
+def first_metric(question: str) -> str | None:
+    """The metric of the first clause that names one: the task to run first."""
+    vocab = vocabulary.get()
+    for part in CLAUSE.split(fold(question)):
+        found = vocab.match_metrics(part)
+        if found:
+            return str(found[0])
+    return None

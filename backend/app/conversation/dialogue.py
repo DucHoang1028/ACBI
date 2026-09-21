@@ -160,6 +160,11 @@ def reply_from_metadata(
         name = metric.label(language)
         text = text.replace(f"{name} ({metric.id})", name)
         text = text.replace(metric.id, name.lower())
+    for dimension in vocabulary.get().dimensions.values():
+        name = dimension.label(language)
+        text = text.replace(f"{name} ({dimension.id})", name)
+        text = text.replace(f"({dimension.id})", "")
+        text = text.replace(dimension.id, name.lower())
     return text
 
 

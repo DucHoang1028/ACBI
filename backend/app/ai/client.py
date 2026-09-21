@@ -297,17 +297,20 @@ def provider_keys(settings: Settings) -> list[KeyState]:
         if name == "groq":
             states += groq
         elif name == "gemini":
+            # Each model has its own quota per key, so a list of models multiplies it.
+            models = [m.strip() for m in settings.gemini_model.split(",") if m.strip()]
             states += [
                 KeyState(
                     key=key,
-                    label=f"gemini{i}",
+                    label=f"gemini{i}:{model}",
                     rpm=10,
                     tpm=200_000,
                     url=GEMINI_URL,
-                    model=settings.gemini_model,
+                    model=model,
                     json_object=True,
                     extra={"reasoning_effort": "none"},
                 )
+                for model in models
                 for i, key in enumerate(settings.gemini_keys(), 1)
             ]
         elif name == "literouter":
@@ -315,7 +318,8 @@ def provider_keys(settings: Settings) -> list[KeyState]:
                 KeyState(
                     key=key,
                     label="literouter",
-                    rpm=8,  # the free plan allows one request every 7 seconds
+                    rpm=8,
+                    gap=7.0,  # the free plan allows one request every 7 seconds
                     tpm=1_000_000,
                     url=LITEROUTER_URL,
                     model=settings.literouter_model,
@@ -332,6 +336,17 @@ def _json_text(content: str) -> str:
     if text.startswith("```"):
         text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
     return text.strip()
+
+
+def _known_fields(model_type: type[BaseModel], reply: str) -> str:
+    """The reply without keys the model type does not define; other text unchanged."""
+    try:
+        data = json.loads(reply)
+    except ValueError:
+        return reply
+    if not isinstance(data, dict):
+        return reply
+    return json.dumps({k: v for k, v in data.items() if k in model_type.model_fields})
 
 
 class GroqClient:
@@ -380,7 +395,8 @@ class GroqClient:
             "A question that asks WHY or for a cause ('tại sao', 'vì sao', 'why', "
             "'nguyên nhân') is unsupported: the system reports figures, not reasons. "
             "unsupported = wants something outside the listed metrics and breakdowns "
-            "(profit, customers, employees, materials, an unlisted split); "
+            "(profit, customers, employees, materials, currency conversion or exchange "
+            "rates, an unlisted split, a place that is not a listed territory); "
             "needs_clarification = a data question that lacks a metric, period or other "
             "detail. Words such as efficiency or performance name no listed metric: "
             "use needs_clarification and ask which listed metric is meant. Several "
@@ -677,9 +693,10 @@ class GroqClient:
                         state.label,
                         result.get("usage", {}).get("total_tokens"),
                     )
-                    return model_type.model_validate_json(
-                        _json_text(result["choices"][0]["message"]["content"] or "")
-                    )
+                    reply = _json_text(result["choices"][0]["message"]["content"] or "")
+                    if state.json_object:  # no strict schema: drop fields it invented
+                        reply = _known_fields(model_type, reply)
+                    return model_type.model_validate_json(reply)
                 except httpx.HTTPStatusError as failure:
                     status = failure.response.status_code
                     if (

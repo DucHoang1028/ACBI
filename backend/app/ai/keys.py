@@ -26,6 +26,7 @@ class KeyState:
     model: str = ""
     json_object: bool = False  # no strict schemas: the schema goes in the prompt
     extra: dict[str, object] = field(default_factory=dict)
+    gap: float = 0.0  # least seconds between two calls on this key
 
 
 class KeyPool:
@@ -57,8 +58,10 @@ class KeyPool:
             for state in ordered:
                 while state.calls and state.calls[0][0] <= now - 60:
                     state.calls.popleft()
+                spaced = not state.calls or now - state.calls[-1][0] >= state.gap
                 if (
                     now >= state.rest_until
+                    and spaced
                     and len(state.calls) < state.rpm
                     and sum(n for _, n in state.calls) + estimated <= state.tpm
                 ):
@@ -72,10 +75,13 @@ class KeyPool:
         with self.lock:
             for state in self.states:
                 moments = [state.rest_until, *(at + 60 for at, _ in state.calls)]
+                paused = state.calls[-1][0] + state.gap if state.calls else 0.0
+                moments.append(paused)  # the pause between two calls on one key
                 for moment in sorted(max(m, now) for m in moments):
                     live = [n for at, n in state.calls if at > moment - 60]
                     if (
                         moment >= state.rest_until
+                        and moment >= paused
                         and len(live) < state.rpm
                         and sum(live) + estimated <= state.tpm
                     ):
