@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # with no key is skipped. Keys are comma-separated.
     llm_provider_order: str = "gemini,groq,literouter"
     gemini_api_keys: SecretStr = SecretStr("")
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-2.5-flash"  # a key it is closed to rests for an hour
     literouter_api_key: SecretStr = SecretStr("")
     literouter_model: str = "deepseek-v3.2:free"
     stt_model: str = "whisper-large-v3-turbo"

@@ -13,6 +13,7 @@ from typing import Any
 
 from app.ai.client import Intent
 from app.core.dates import (
+    GROWTH,
     intent_hints,
     is_confirmation,
     single_dimension,
@@ -28,7 +29,7 @@ FILL_KEYS = ("metric_id", "dimension", "territory", "series_dimension", "limit")
 
 FOLLOW_UP = (
     r"\b(?:con|the con|vay|nua|trong do|o do|cua no|nhu tren|tuong tu|"
-    r"what about|how about|same|those|instead|and)\b"
+    r"what about|how about|same|those|them|these|instead|and)\b"
 )
 
 
@@ -68,6 +69,7 @@ def says_something(
         or re.search(r"\d", value)
         or re.search(FOLLOW_UP, value)
         or re.search(RANKING, value)
+        or re.search(GROWTH, value)
         or vocab.match_metrics(value)
         or vocab.match_members(value)
         or vocab.match_dimensions(value)

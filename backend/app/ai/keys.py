@@ -6,7 +6,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 # Seconds a key rests after a failure, by cause.
-REST_AUTH = 3600.0  # 401/403: the key itself is unusable
+REST_AUTH = 3600.0  # 401/403/404: the key or its model is unusable
 REST_SERVER = 30.0  # 5xx or transport trouble
 REST_RATE_DEFAULT = 60.0  # 429 without Retry-After
 
@@ -113,7 +113,7 @@ class KeyPool:
         self, state: KeyState, status: int | None, retry_after: float | None
     ) -> None:
         """Rest the key and make the next one current."""
-        if status in (401, 403):
+        if status in (401, 403, 404):  # 404: the model is closed to this key
             rest = REST_AUTH
         elif status == 429:
             rest = max(1.0, retry_after or REST_RATE_DEFAULT)

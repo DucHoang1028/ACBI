@@ -147,7 +147,10 @@ def supports(intent: Intent) -> bool:
         return True  # template only; an unsupported grouping is refused, not guessed
     if intent.dimension == "week":
         return False
-    if intent.metric_id == "sales_growth" and intent.dimension != "none":
+    if intent.metric_id == "sales_growth" and intent.dimension not in {
+        "none",
+        "sales_territory",
+    }:
         return False
     return not (
         intent.metric_id in {"production_output", "defect_rate"}
@@ -166,7 +169,7 @@ def sales_sql(intent: Intent, params: dict[str, Any], start: date) -> str:
         "product_category",
     }:
         raise ValueError("Unsupported sales dimension")
-    if metric == "sales_growth" and dimension != "none":
+    if metric == "sales_growth" and dimension not in {"none", "sales_territory"}:
         raise ValueError("Sales growth breakdown is not yet supported")
     if intent.zero_scrap_only:
         raise ValueError("Zero scrap only applies to defect rate")
@@ -203,6 +206,19 @@ def sales_sql(intent: Intent, params: dict[str, Any], start: date) -> str:
         params["baseline_start"], params["baseline_end"] = growth_baseline(
             intent.period, start, params["end"]
         )
+        if dimension == "sales_territory":
+            now = "h.orderdate>=:start AND h.orderdate<:end"
+            before = "h.orderdate>=:baseline_start AND h.orderdate<:baseline_end"
+            return f"""
+SELECT t.territoryid,t.name AS territory,
+ SUM(h.subtotal) FILTER (WHERE {now}) AS current_revenue,
+ SUM(h.subtotal) FILTER (WHERE {before}) AS previous_revenue,
+ (SUM(h.subtotal) FILTER (WHERE {now})-SUM(h.subtotal) FILTER (WHERE {before}))/NULLIF(SUM(h.subtotal) FILTER (WHERE {before}),0) AS sales_growth
+FROM sales.salesorderheader h{territory_join} WHERE true{territory_where}
+GROUP BY t.territoryid,t.name
+HAVING COUNT(*) FILTER (WHERE {now})>0 AND COUNT(*) FILTER (WHERE {before})>0
+ORDER BY sales_growth DESC NULLS LAST LIMIT :limit
+"""
         return f"""
 WITH periods AS (
  SELECT SUM(h.subtotal) FILTER (WHERE h.orderdate>=:start AND h.orderdate<:end) AS current_revenue,

@@ -53,3 +53,18 @@ def test_growth_baseline_and_incompatible_dimension() -> None:
     assert plan.params["baseline_start"] == date(2025, 4, 1)
     with pytest.raises(ValueError, match="factory"):
         build(intent(factory_id=1), "manager", ANCHOR)
+
+
+def test_growth_by_territory_uses_the_trusted_template() -> None:
+    from app.ai.client import Intent
+    from app.query.builder import supports
+    from app.query.validation import validate
+
+    growth = intent(metric_id="sales_growth", dimension="sales_territory")
+    assert supports(growth)
+    plan = build(growth, "manager", ANCHOR)
+    assert "GROUP BY t.territoryid,t.name" in plan.sql
+    checked = validate(plan, growth, "manager", trusted_template=True)
+    assert checked.params["baseline_start"] == date(2025, 4, 1)
+    assert not supports(intent(metric_id="sales_growth", dimension="product"))
+    assert isinstance(growth, Intent)
