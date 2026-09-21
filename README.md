@@ -1,28 +1,182 @@
-# ACBI
+# ACBI — Conversational Business Intelligence
 
-**[Open the live demo](https://thereafter-revision-acids-climbing.trycloudflare.com)**
+**English** · [Tiếng Việt](#tiếng-việt)
 
-This is the full application, hosted on the owner's PC. Login is required;
-request credentials from the owner. The temporary link works only while the PC,
-Docker, and tunnel are running and changes when the tunnel restarts.
-See [demo operation and verification](docs/LOCAL_DEMO.md).
-See [current components, role accounts, and limitations](docs/CURRENT_STATUS.md).
+ACBI lets anyone ask questions about **revenue, production and quality** in plain
+language (Vietnamese or English) and get a chart, a table and a one-line answer.
+Every number comes from a vetted data query, not from the AI, and every answer shows
+its source so you can check it. No SQL or programming knowledge is needed.
 
-Phase 4 of the AI-Powered Conversational Business Intelligence prototype. The local AdventureWorks PostgreSQL warehouse stays external to ACBI. Approved metrics, role-filtered questions, validated charts, saved results, editable voice transcripts, and local administration are available. The owner approved the documented Groq business context, and live advanced analysis is enabled locally.
+- **Live demo:** the link is printed when the demo tunnel starts (it changes each time).
+  The login page has "Login as manager / sales / production_a / it_admin" buttons.
+- **In-app guide:** click **Guide** in the top bar of the web app (also at `/#guide`),
+  in English and Vietnamese. It covers everything below in more detail.
 
-Start with `./scripts/acbi.ps1 up` on Windows, then open http://localhost:8080. Run `./scripts/acbi.ps1 seed-users` once and open the private `deploy/seed-credentials.txt` file for local login. With Make available, `make up` starts the same local configuration. Exactly three ACBI services run: web, backend and db. The application database is internal-only.
+## The sample data, in plain words
 
-- [Assumptions and approval decisions](docs/ASSUMPTIONS.md)
-- [Phase 0 report](docs/PHASE_0_REPORT.md)
-- [Phase 1 report](docs/PHASE_1_REPORT.md)
-- [Phase 2 report](docs/PHASE_2_REPORT.md)
-- [Phase 3 report](docs/PHASE_3_REPORT.md)
-- [Phase 4 report](docs/PHASE_4_REPORT.md)
-- [Proposed Groq context](docs/PHASE_3_EXTERNAL_CONTEXT.md)
-- [Runbook](docs/RUNBOOK.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Oracle Cloud deployment](docs/CLOUD_DEPLOYMENT.md) — optional cloud profile; not deployed.
-- [Approved dictionary](data/business_dictionary/dictionary.yaml)
-- [Golden questions](data/eval/golden_questions.yaml)
+The data is **AdventureWorks**, Microsoft's well-known sample about a fictional
+bicycle company. Think of two big ledgers: one records every **sales order**, the other
+every **production run**. Each database "table" is like an Excel sheet: rows are events,
+columns describe them. The application only **reads** the data and never changes it.
 
-Default model: Groq `openai/gpt-oss-120b`; voice transcription uses `whisper-large-v3-turbo`. The 40-case trusted query evaluation, six-case generated-query evaluation, and Phase 4 checks use FakeLLM or FakeSTT. One approved live Groq generated-query smoke test passed. Local evaluations do not establish broad live-model accuracy. The private `deploy/.env` enables metadata use but keeps result-row export disabled.
+| Ledger | What one row is | Size in this demo |
+|---|---|---|
+| Sales orders (+ order lines) | one customer order (and each item inside it) | 31,465 orders, 121,317 lines |
+| Sales territories | one of 10 territories: Northwest, Northeast, Central, Southwest, Southeast, Canada, France, Germany, United Kingdom, Australia | 10 |
+| Products and categories | one product; 4 categories (Bikes, Components, Clothing, Accessories) | 504 products |
+| Work orders | one production run: product, units ordered, units scrapped, due date, finish date | 72,591 |
+| Routing steps and locations | the steps a work order passes through, at 14 locations (Frame Welding, Paint, Subassembly, Final Assembly ...) | 14 locations |
+| Factories A, B, C | **made up for the demo**: the 14 locations are assigned in rotation to 3 factories so factory-level access can be tried | 3 |
+
+Data covers **May 2022 – June 2025** (dates were shifted so the data ends on
+**2025-06-29**; "this month" means June 2025).
+
+Revenue follows the sales side. Output, defects and on-time follow the production side.
+The two sides meet at *Product*.
+
+## What you can ask
+
+| Metric | Plain meaning | How it is calculated |
+|---|---|---|
+| Revenue | merchandise sold | sum of order subtotals by order date (tax and shipping excluded) |
+| Revenue growth | % change against the period just before | (this − previous) ÷ previous, for the latest month or quarter |
+| Production output | good units finished | units ordered − units scrapped, by finish date |
+| Defect rate | share of units scrapped | scrapped ÷ ordered |
+| On-time completion rate | share of work orders finished by their due date | on time ÷ all orders |
+
+Add "by ..." to break a figure down: by month / week / day, territory, product,
+category, factory, production line, or scrap reason.
+
+Examples that work:
+
+- `Revenue 2024 by territory` → `What about 2023?` → `Only the top 3` → `Draw a pie chart`
+- `Production output last month by factory`
+- `Defect rate by product last month, top 5`
+- `On-time rate last quarter by production line`
+- `Forecast revenue for the next 6 months` (always labelled as a forecast)
+- `Which metrics can you report? How is revenue calculated?`
+
+Several tasks in one message: the first runs, the rest are listed; type "next" to continue.
+Charts are chosen by the shape of the result (number card, line, pie/donut, bar, stacked
+bar) and can be changed in words: "switch to a donut chart".
+
+**Not supported:** explaining reasons ("why"), splitting by quarter, comparing two
+arbitrary periods, staff / salary / customer / profit questions. The system says so
+instead of guessing.
+
+## Roles
+
+| Account | Can see | Cannot see |
+|---|---|---|
+| `manager` | everything | account administration |
+| `sales` | revenue and revenue growth | production, quality |
+| `production_a` | output, defects, on-time for Factory A | revenue; factories B and C |
+| `it_admin` | administration page | all business figures |
+
+## Run it
+
+```
+docker compose -p acbi -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml up -d --build --wait
+```
+
+Open http://localhost:8080. Add `-f deploy/docker-compose.demo.yml` when serving through
+a tunnel (it sets the HTTPS forwarding header). Set `DEMO_LOGIN_ENABLED=false` to turn
+off the passwordless demo buttons. Language-model keys go in `deploy/.env` (Groq) and
+`deploy/llm-providers.local` (Gemini, LiteRouter); providers are tried in
+`LLM_PROVIDER_ORDER` (default `gemini,groq,literouter`).
+
+## More documentation
+
+- [Assumptions and approval decisions](docs/ASSUMPTIONS.md) · [Architecture](docs/ARCHITECTURE.md) · [Runbook](docs/RUNBOOK.md) · [API](docs/API.md)
+- [Current status and limitations](docs/CURRENT_STATUS.md) · [Local demo](docs/LOCAL_DEMO.md)
+- Phase reports: [0](docs/PHASE_0_REPORT.md), [1](docs/PHASE_1_REPORT.md), [2](docs/PHASE_2_REPORT.md), [3](docs/PHASE_3_REPORT.md), [4](docs/PHASE_4_REPORT.md)
+- [Approved dictionary](data/business_dictionary/dictionary.yaml) · [Golden questions](data/eval/golden_questions.yaml)
+
+---
+
+# Tiếng Việt
+
+**[English](#acbi--conversational-business-intelligence)** · Tiếng Việt
+
+ACBI cho phép bất kỳ ai hỏi về **doanh thu, sản xuất và chất lượng** bằng lời thường
+(tiếng Việt hoặc tiếng Anh) và nhận về biểu đồ, bảng số cùng một câu trả lời ngắn. Mọi
+con số đều do câu lệnh dữ liệu đã được kiểm duyệt tính ra, không phải AI tự nghĩ, và mỗi
+câu trả lời đều ghi nguồn để bạn kiểm chứng. Không cần biết SQL hay lập trình.
+
+- **Bản demo trực tuyến:** đường dẫn hiện ra mỗi khi mở đường hầm demo (mỗi lần một khác).
+  Trang đăng nhập có các nút "Đăng nhập với manager / sales / production_a / it_admin".
+- **Hướng dẫn trong ứng dụng:** bấm **Hướng dẫn** ở thanh trên cùng (hoặc mở `/#guide`),
+  có cả tiếng Việt và tiếng Anh, chi tiết hơn phần dưới đây.
+
+## Dữ liệu mẫu, giải thích đời thường
+
+Dữ liệu là **AdventureWorks**, bộ dữ liệu mẫu nổi tiếng của Microsoft về một công ty xe
+đạp tưởng tượng. Hãy hình dung hai cuốn sổ lớn: một cuốn ghi mọi **đơn bán hàng**, một
+cuốn ghi mọi **đợt sản xuất**. Mỗi "bảng" trong cơ sở dữ liệu giống một trang tính
+Excel: hàng là từng sự việc, cột mô tả sự việc đó. Ứng dụng chỉ **đọc** dữ liệu, không bao
+giờ sửa.
+
+| Sổ | Một hàng là gì | Quy mô trong bản demo |
+|---|---|---|
+| Đơn hàng (và dòng hàng) | một lần khách đặt hàng (và từng món trong đơn) | 31.465 đơn, 121.317 dòng |
+| Khu vực bán hàng | một trong 10 khu vực: Northwest, Northeast, Central, Southwest, Southeast, Canada, France, Germany, United Kingdom, Australia | 10 |
+| Sản phẩm và nhóm sản phẩm | một sản phẩm; 4 nhóm (Bikes, Components, Clothing, Accessories) | 504 sản phẩm |
+| Lệnh sản xuất | một đợt sản xuất: sản phẩm, số đặt làm, số hỏng, hạn giao, ngày xong | 72.591 |
+| Công đoạn và địa điểm | các bước một lệnh sản xuất đi qua, ở 14 địa điểm (Frame Welding, Paint, Subassembly, Final Assembly ...) | 14 địa điểm |
+| Nhà máy A, B, C | **do demo tự đặt ra**: 14 địa điểm được gán xoay vòng vào 3 nhà máy để thử phân quyền theo nhà máy | 3 |
+
+Dữ liệu trải từ **tháng 5/2022 đến tháng 6/2025** (ngày đã được dời để kết thúc vào
+**29/06/2025**; "tháng này" nghĩa là tháng 6/2025).
+
+Doanh thu đi theo nhánh bán hàng. Sản lượng, phế phẩm và đúng hạn đi theo nhánh sản
+xuất. Hai nhánh gặp nhau ở *Sản phẩm*.
+
+## Bạn có thể hỏi gì
+
+| Chỉ số | Ý nghĩa | Cách tính |
+|---|---|---|
+| Doanh thu | tiền hàng bán ra | tổng tiền hàng các đơn theo ngày đặt (chưa gồm thuế và phí vận chuyển) |
+| Tăng trưởng doanh thu | % thay đổi so với kỳ ngay trước | (kỳ này − kỳ trước) ÷ kỳ trước, cho tháng hoặc quý gần nhất |
+| Sản lượng | số sản phẩm đạt yêu cầu đã làm xong | số đặt làm − số hỏng, theo ngày hoàn thành |
+| Tỷ lệ phế phẩm | tỷ lệ sản phẩm bị hỏng | số hỏng ÷ số đặt làm |
+| Tỷ lệ hoàn thành đúng hạn | tỷ lệ lệnh sản xuất xong đúng hoặc trước hạn giao | số lệnh đúng hạn ÷ tổng số lệnh |
+
+Thêm "theo ..." để chia nhỏ số liệu: theo tháng / tuần / ngày, khu vực, sản phẩm, nhóm
+sản phẩm, nhà máy, dây chuyền hoặc lý do phế phẩm.
+
+Ví dụ hỏi được:
+
+- `Doanh thu năm 2024 theo khu vực` → `Còn năm 2023?` → `Chỉ lấy top 3` → `Vẽ biểu đồ tròn`
+- `Sản lượng tháng trước theo nhà máy`
+- `Tỷ lệ phế phẩm theo sản phẩm tháng trước, top 5`
+- `Tỷ lệ hoàn thành đúng hạn quý trước theo dây chuyền`
+- `Dự báo doanh thu 6 tháng tới` (luôn ghi rõ là dự báo)
+- `Bạn báo cáo được những chỉ số nào? Doanh thu tính thế nào?`
+
+Nhiều việc trong một câu: hệ thống làm việc đầu tiên và liệt kê các việc còn lại; gõ
+"tiếp đi" để làm tiếp. Biểu đồ được chọn theo hình dạng kết quả (thẻ số, đường, tròn hoặc
+vành khuyên, cột, cột chồng) và đổi được bằng lời: "đổi sang biểu đồ vành khuyên".
+
+**Chưa hỗ trợ:** giải thích nguyên nhân ("tại sao"), chia theo quý, so sánh hai kỳ tùy ý,
+câu hỏi về nhân sự, lương, khách hàng, lợi nhuận. Hệ thống nói rõ điều đó thay vì đoán.
+
+## Vai trò
+
+| Tài khoản | Thấy được | Không thấy |
+|---|---|---|
+| `manager` | mọi thứ | trang quản trị tài khoản |
+| `sales` | doanh thu và tăng trưởng doanh thu | sản xuất, chất lượng |
+| `production_a` | sản lượng, phế phẩm, đúng hạn của Factory A | doanh thu; nhà máy B và C |
+| `it_admin` | trang quản trị | mọi số liệu kinh doanh |
+
+## Chạy thử
+
+```
+docker compose -p acbi -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml up -d --build --wait
+```
+
+Mở http://localhost:8080. Thêm `-f deploy/docker-compose.demo.yml` khi chạy qua đường hầm
+(nó bật header HTTPS). Đặt `DEMO_LOGIN_ENABLED=false` để tắt các nút đăng nhập nhanh
+không cần mật khẩu. Khóa của mô hình ngôn ngữ đặt trong `deploy/.env` (Groq) và
+`deploy/llm-providers.local` (Gemini, LiteRouter); thứ tự thử theo `LLM_PROVIDER_ORDER`
+(mặc định `gemini,groq,literouter`).
