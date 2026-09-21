@@ -128,4 +128,12 @@
 - {id: O26, user: manager, question: "Doanh thu Đức Pháp Anh Úc năm 2024 so sánh giúp mình", expect: [ok, needs_clarification], metric: revenue}
 - {id: O27, user: manager, question: "Sản lượng của nhà máy Z quý trước", expect: [needs_clarification]}
 - {id: O28, user: manager, question: "Doanh thu của khu vực Atlantis năm 2024", expect: [needs_clarification]}
+- {id: M01, user: manager, conversation: meta, question: "Dự báo doanh thu 6 tháng tới", expect: [ok, needs_clarification]}
+- {id: M02, user: manager, conversation: meta, question: "Đây là dự báo dựa trên doanh thu tổng à", expect: [ok], avoid: "Dự báo, không phải số liệu"}
+- {id: M03, user: manager, conversation: meta, question: "Con số đó lấy từ khoảng thời gian nào?", expect: [ok]}
+- {id: M04, user: manager, question: "Doanh số của 2 nước là Úc và Canada từ năm 2022 đến nay tăng như nào", expect: [ok, needs_clarification], metric: revenue}
+- {id: M05, user: manager, question: "Doanh thu của Úc và Canada năm 2024", expect: [ok], metric: revenue, window: ["2024-01-01", "2025-01-01"], rows_max: 2}
+- {id: M06, user: manager, question: "Doanh thu nước Đức năm 2024", expect: [ok], metric: revenue, window: ["2024-01-01", "2025-01-01"], rows_max: 1}
+- {id: M07, user: manager, question: "Doanh thu từ năm 2022 đến nay theo tháng", expect: [ok], metric: revenue}
+- {id: M08, user: manager, question: "Doanh thu năm 2024 tăng như nào và dự báo giúp tôi năm 2026", expect: [needs_clarification, ok]}
 

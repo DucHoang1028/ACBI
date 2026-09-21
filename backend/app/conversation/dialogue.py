@@ -18,6 +18,34 @@ logger = logging.getLogger("acbi.chat")
 NUMBER = re.compile(r"\d[\d.,]*\d|\d")
 
 
+def last_answer(saved: dict[str, Any] | None) -> dict[str, Any] | None:
+    """What the previous answer in this conversation was, for questions about it."""
+    if not saved:
+        return None
+    payload = saved.get("payload") or {}
+    sources = payload.get("sources") or {}
+    forecast = sources.get("forecast") or {}
+    lines = [
+        f"Question: {saved.get('question')}",
+        f"Metric: {saved.get('metric_id')}",
+        f"Rows returned: {len(payload.get('table') or [])}",
+        f"Answer text: {payload.get('answer_text')}",
+        f"Period: {sources.get('parameters', {}).get('start')} to "
+        f"{sources.get('parameters', {}).get('end')} (end exclusive)",
+        f"Chart: {(payload.get('viz_config') or {}).get('type')}",
+    ]
+    if forecast:
+        lines.append(
+            f"It was a forecast: method {forecast.get('method')} over "
+            f"{forecast.get('history_months')} recorded months, "
+            f"hold-out error {forecast.get('backtest_mape')}, "
+            f"horizon {forecast.get('horizon_months')} months"
+        )
+    else:
+        lines.append("It was recorded data, not a forecast.")
+    return {"id": "previous_answer", "text": "\n".join(lines)}
+
+
 def references(role: str, data_as_of: str) -> list[dict[str, Any]]:
     """Approved metadata visible to this role, described without access terms."""
     vocab = vocabulary.get()
@@ -43,7 +71,14 @@ def references(role: str, data_as_of: str) -> list[dict[str, Any]]:
         label = f"{dimension.id} ({dimension.vi} / {dimension.en})"
         if dimension.id in grains:
             label += f", grains: {', '.join(sorted(grains[dimension.id]))}"
-        detail = ", ".join(names)
+        detail = ", ".join(
+            (
+                f"{n} (= {', '.join(dimension.aliases[n])})"
+                if dimension.aliases.get(n)
+                else n
+            )
+            for n in names
+        )
         member_lines.append(
             f"- {label}" + (f"; {len(names)} members: {detail}" if names else "")
         )
@@ -103,8 +138,11 @@ def reply_from_metadata(
     mode: str,
     data_as_of: str,
     budget: RequestBudget,
+    previous: dict[str, Any] | None = None,
 ) -> str | None:
     refs = references(role, data_as_of)
+    if previous:
+        refs.append(previous)
     try:
         text = str(client.converse(question, refs, mode, budget)).strip()
     except ValueError:  # malformed model output: use dictionary wording instead

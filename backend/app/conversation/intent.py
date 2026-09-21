@@ -55,10 +55,14 @@ def merged_intent(
     for key in PERIOD_KEYS:  # calendar wording is resolved by the backend
         if key in hints:
             current[key] = hints[key]
+    override = {"metric_id"} if hints.get("metric_override") else set()
     for key in FILL_KEYS:  # the model's reading stands; hints only fill gaps
-        if key in hints and current.get(key) in (None, "none", 100) and key != "limit":
-            current[key] = hints[key]
-        elif key == "limit" and key in hints and hints[key] != 100:
+        if key not in hints:
+            continue
+        if key == "limit":
+            if hints[key] != 100:
+                current[key] = hints[key]
+        elif key in override or current.get(key) in (None, "none"):
             current[key] = hints[key]
     for field in ("metric_id", "period", "factory_id", "territory"):
         if current[field] is None:

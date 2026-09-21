@@ -72,6 +72,8 @@ class Metric(Named):
 class Dimension(Named):
     grains: dict[str, tuple[str, ...]] = field(default_factory=dict)
     source: dict[str, str] | None = None
+    # Member name -> other words for it, e.g. Germany: ('Đức', 'nước Đức').
+    aliases: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 def alternation(words: list[str] | tuple[str, ...]) -> str:
@@ -129,6 +131,10 @@ class Vocabulary:
                     for grain, words in (entry.get("grains") or {}).items()
                 },
                 source=entry.get("memberSource"),
+                aliases={
+                    name: tuple(words)
+                    for name, words in (entry.get("memberAliases") or {}).items()
+                },
             )
         self.sources = dictionary.get("dataSources", [])
         self.members = members or {}
@@ -183,12 +189,21 @@ class Vocabulary:
             ordered.remove("product")  # "nhóm sản phẩm" is not a per-product split
         return ordered
 
+    def member_terms(self, dimension: str, name: str) -> list[str]:
+        """Every way this member may be written: its own name and its aliases."""
+        entry = self.dimensions.get(dimension)
+        words = entry.aliases.get(name, ()) if entry else ()
+        return [fold(name), *(fold(w) for w in words)]
+
+    def member_pattern(self, dimension: str, name: str) -> str:
+        return alternation(self.member_terms(dimension, name))
+
     def match_members(self, folded: str) -> dict[str, list[str]]:
         """Dimension members (territory names, factories, ...) present in the text."""
         found: dict[str, list[str]] = {}
         for dimension, names in self.members.items():
             for name in names:
-                if re.search(alternation([fold(name)]), folded):
+                if re.search(self.member_pattern(dimension, name), folded):
                     found.setdefault(dimension, []).append(name)
         return found
 
@@ -197,10 +212,12 @@ class Vocabulary:
         known = self.members.get(dimension)
         if not known:
             return []  # the catalogue is empty: nothing to validate against
-        names = [n for n in known if re.search(alternation([fold(n)]), folded)]
+        names = [
+            n for n in known if re.search(self.member_pattern(dimension, n), folded)
+        ]
         rest = folded
         for name in names:
-            rest = re.sub(alternation([fold(name)]), " ", rest)
+            rest = re.sub(self.member_pattern(dimension, name), " ", rest)
         leftover = re.sub(r"\b(?:va|and|voi|cung)\b|[|,&]", " ", rest).split()
         return names if names and not leftover else None
 
@@ -212,7 +229,11 @@ class Vocabulary:
             known = self.members.get(dimension.id)
             if not known or not dimension.synonyms:
                 continue
-            tails = {fold(name).split()[-1] for name in known}
+            tails = {
+                term.split()[-1]
+                for name in known
+                for term in self.member_terms(dimension.id, name)
+            }
             for match in re.finditer(
                 alternation(dimension.synonyms) + r"\s+([a-z]|\d{1,2})\b", folded
             ):
@@ -233,8 +254,8 @@ class Vocabulary:
                 self.match_dimensions("theo " + phrase)
                 or self.match_metrics(phrase)
                 or any(
-                    re.search(alternation([fold(n)]), phrase)
-                    for names in self.members.values()
+                    re.search(self.member_pattern(dimension, n), phrase)
+                    for dimension, names in self.members.items()
                     for n in names
                 )
             ):
@@ -277,7 +298,14 @@ class Vocabulary:
         for d in self.dimensions.values():
             members = self.members.get(d.id, [])
             ids = self.member_ids.get(d.id, {})
-            names = [f"{n} (id {ids[n]})" if n in ids else n for n in members[:40]]
+            names = [
+                (
+                    f"{n} (id {ids[n]})"
+                    if n in ids
+                    else f"{n} (= {', '.join(d.aliases[n])})" if d.aliases.get(n) else n
+                )
+                for n in members[:40]
+            ]
             shown = ", ".join(names) + (" ..." if len(members) > 40 else "")
             lines.append(
                 f"- {d.id} ({d.vi} / {d.en})" + (f": {shown}" if members else "")

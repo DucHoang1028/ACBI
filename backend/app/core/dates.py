@@ -1,7 +1,6 @@
 """Deterministic, half-open calendar periods anchored to warehouse data."""
 
 import re
-import unicodedata
 from datetime import date, timedelta
 
 from app.core.text import fold
@@ -10,11 +9,11 @@ from app.metadata import vocabulary
 
 def date_hints(question: str) -> dict[str, str | None]:
     """Resolve only unambiguous calendar wording; leave comparisons to the model."""
-    value = "".join(
-        c
-        for c in unicodedata.normalize("NFD", question.lower())
-        if unicodedata.category(c) != "Mn"
-    )
+    value = fold(question)
+    # "from 2022 until now" is a range the backend cannot close without the
+    # anchor: the model resolves it against context.data_as_of.
+    if re.search(r"\b(?:den nay|toi nay|den gio|to now|until now|to date)\b", value):
+        return {}
     aliases = {
         "today": r"\b(?:hom nay|today)\b",
         "yesterday": r"\b(?:hom qua|yesterday)\b",
@@ -114,8 +113,10 @@ def intent_hints(question: str) -> dict[str, object]:
     vocab = vocabulary.get()
     hints: dict[str, object] = {**date_hints(question)}
     found = vocab.match_metrics(value)
-    if re.search(GROWTH, value) and "revenue" in found and "sales_growth" not in found:
+    growth_wording = re.search(GROWTH, value)
+    if growth_wording and "revenue" in found and "sales_growth" not in found:
         found = ["sales_growth" if m == "revenue" else m for m in found]
+        hints["metric_override"] = True
     if "sales_growth" in found and "revenue" in found:
         found.remove("revenue")
     if len(found) == 1:
@@ -151,19 +152,32 @@ def intent_hints(question: str) -> dict[str, object]:
     return hints
 
 
+# Calendar units are language, not schema: they do not change with the database.
+# The two languages are matched separately: folding "đây" gives "day", which would
+# otherwise collide with the English unit.
+UNITS_VI = r"\b(?:ngay|tuan|thang|quy|nam|ky)\b"
+UNITS_EN = r"\b(?:day|week|month|quarter|year|period)s?\b"
+
+
+def mentions_time(question: str) -> bool:
+    """True when the question itself names a date, a period or a number of them.
+
+    A follow-up that names none is asking about the answer already given, not for
+    a new period, even when the model copies one from the conversation."""
+    return bool(
+        re.search(r"\d", question)
+        or re.search(UNITS_VI, fold(question))
+        or re.search(UNITS_EN, question.lower())
+        or date_hints(question)
+    )
+
+
 def is_confirmation(question: str) -> bool:
-    value = "".join(
-        c
-        for c in unicodedata.normalize("NFD", question.lower())
-        if unicodedata.category(c) != "Mn"
-    ).strip(" .!?")
+    value = fold(question).strip(" .!?")
     return value in {
         "dung",
-        "đung",
         "dung vay",
-        "đung vay",
         "dung vay so sanh di",
-        "đung vay so sanh đi",
         "nhu vi du ay",
         "ok",
         "okay",

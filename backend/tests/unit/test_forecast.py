@@ -56,3 +56,22 @@ def test_day_and_week_periods_follow_the_data_date() -> None:
     assert resolve_period("yesterday", anchor) == (date(2025, 6, 28), date(2025, 6, 29))
     assert resolve_period("this_week", anchor) == (date(2025, 6, 23), date(2025, 6, 30))
     assert resolve_period("last_week", anchor) == (date(2025, 6, 16), date(2025, 6, 23))
+
+
+def test_a_follow_up_that_names_no_period_is_about_the_answer_just_given() -> None:
+    from app.core.dates import mentions_time
+
+    for asking_about_it in (
+        "Đây là dự báo dựa trên doanh thu tổng à",
+        "Con số đó chắc chắn không?",
+        "Is that a forecast?",
+    ):
+        assert not mentions_time(asking_about_it), asking_about_it
+    for a_new_request in (
+        "Dự báo doanh thu 6 tháng tới",
+        "Dự báo sản lượng quý tới",
+        "Forecast revenue for next year",
+        "Doanh thu tháng này",
+        "Dự báo đến 2027",
+    ):
+        assert mentions_time(a_new_request), a_new_request

@@ -373,3 +373,29 @@ def test_unknown_factory_and_territory_are_asked_about() -> None:
         "Sản lượng nhà máy 9 tháng trước",
     )
     assert bad_id.missing_fields == ["factory_id"]
+
+
+def test_growth_wording_settles_the_metric_even_when_the_model_reads_revenue() -> None:
+    from app.conversation.intent import merged_intent
+    from app.core.dates import intent_hints, is_confirmation
+
+    said = intent(metric_id="revenue", period="this_month", needs_clarification=False)
+    resolved = merged_intent(
+        said, None, "Doanh thu tháng này so với tháng trước thế nào?"
+    )
+    assert resolved.metric_id == "sales_growth" and not resolved.needs_clarification
+    asked = merged_intent(
+        intent(metric_id="revenue", period="this_month", needs_clarification=True),
+        None,
+        "Doanh thu tháng này so với tháng trước",
+    )
+    assert asked.metric_id == "sales_growth"
+    # Without that wording the model's own reading stands.
+    plain = merged_intent(
+        intent(metric_id="defect_rate", period="this_month", needs_clarification=False),
+        None,
+        "Doanh thu tháng này",
+    )
+    assert plain.metric_id == "defect_rate"
+    assert "metric_override" not in intent_hints("Doanh thu tháng này")
+    assert is_confirmation("Đúng vậy") and is_confirmation("ok")

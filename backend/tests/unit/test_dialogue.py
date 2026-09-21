@@ -74,3 +74,63 @@ def test_a_dropped_breakdown_or_filter_is_detected_without_a_noun_list() -> None
         ("sales_territory", "Atlantis")
     ]
     assert vocab.capitalised_after_dimension("doanh thu theo khu vực") == []
+
+
+def test_member_names_in_the_users_language_come_from_the_dictionary() -> None:
+    from app.core.dates import intent_hints, territory_names
+    from app.core.text import fold
+    from app.metadata import vocabulary
+
+    vocab = vocabulary.get()
+    assert vocab.match_members(fold("doanh thu cua Uc va Canada")) == {
+        "sales_territory": ["Australia", "Canada"]
+    }
+    assert territory_names("Đức và Pháp") == ["France", "Germany"]
+    assert territory_names("nước Anh") == ["United Kingdom"]
+    assert territory_names("Atlantis") is None
+    hints = intent_hints("doanh số của 2 nước là Úc và Canada năm 2024")
+    assert hints["territory"] == "Australia|Canada"
+    assert hints["dimension"] == "sales_territory"
+    # The aliases reach the model, so it can translate what the user typed.
+    assert "Đức" in vocab.describe() or "duc" in vocab.describe()
+
+
+def test_an_open_ended_range_is_left_to_the_model() -> None:
+    from app.core.dates import date_hints
+
+    for text in (
+        "doanh thu từ năm 2022 đến nay",
+        "revenue from 2022 to now",
+        "sản lượng từ 2023 tới nay",
+    ):
+        assert date_hints(text) == {}, text
+    # A plain named year is still resolved here.
+    assert date_hints("doanh thu năm 2022")["start_date"] == "2022-01-01"
+
+
+def test_a_question_about_the_previous_answer_gets_it_as_a_reference() -> None:
+    from app.conversation.dialogue import last_answer
+
+    assert last_answer(None) is None
+    plain = last_answer(
+        {
+            "question": "Doanh thu năm 2024",
+            "metric_id": "revenue",
+            "payload": {"table": [{"revenue": "1"}], "answer_text": "x", "sources": {}},
+        }
+    )
+    assert plain and "not a forecast" in plain["text"]
+    predicted = last_answer(
+        {
+            "question": "Dự báo doanh thu",
+            "metric_id": "revenue",
+            "payload": {
+                "table": [],
+                "answer_text": "Dự báo...",
+                "sources": {
+                    "forecast": {"method": "recent_average", "history_months": 36}
+                },
+            },
+        }
+    )
+    assert predicted and "recent_average" in predicted["text"]

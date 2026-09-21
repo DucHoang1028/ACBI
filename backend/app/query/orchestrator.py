@@ -17,7 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.ai.budget import RequestBudget
 from app.ai.client import FakeLLM, Intent
-from app.conversation.dialogue import fallback, reply_from_metadata
+from app.conversation.dialogue import fallback, last_answer, reply_from_metadata
 from app.conversation.intent import (
     clarification_text,
     local_intent,
@@ -25,7 +25,12 @@ from app.conversation.intent import (
     validate_choices,
 )
 from app.conversation.service import get_context, next_turns, save_context
-from app.core.dates import is_share_question, metric_words, month_start
+from app.core.dates import (
+    is_share_question,
+    mentions_time,
+    metric_words,
+    month_start,
+)
 from app.core.text import fold
 from app.history.service import audit, latest_in_conversation
 from app.history.service import save as save_result
@@ -225,8 +230,17 @@ def run_dialogue(
     """Answer about the data itself, or decline what the system cannot serve."""
     limitation = raw.intent_type == "unsupported"
     mode = "limitation" if limitation else "answer"
+    previous = last_answer(
+        latest_in_conversation(state.storage, user["id"], conversation_id, user["role"])
+    )
     text_out = reply_from_metadata(
-        state.llm, body.question, user["role"], mode, anchor.isoformat(), budget
+        state.llm,
+        body.question,
+        user["role"],
+        mode,
+        anchor.isoformat(),
+        budget,
+        previous,
     ) or fallback(mode, body.language, user["role"])
     status = "needs_clarification" if limitation else "ok"
     save_context(
@@ -621,6 +635,34 @@ def answer(
             )
             return 200, result
         if raw.intent_type == "forecast":
+            # "Was that based on total revenue?" names no period of its own:
+            # it asks about the forecast just given, so do not compute again.
+            repeated = not mentions_time(body.question) and (
+                (
+                    (
+                        latest_in_conversation(
+                            storage, user["id"], conversation_id, user["role"]
+                        )
+                        or {}
+                    ).get("payload")
+                    or {}
+                )
+                .get("sources", {})
+                .get("forecast")
+            )
+            if repeated:
+                outcome, result = run_dialogue(
+                    raw.model_copy(update={"intent_type": "metadata"}),
+                    body,
+                    user,
+                    state,
+                    budget,
+                    anchor,
+                    request_id,
+                    conversation_id,
+                    prior,
+                )
+                return 200, result
             try:
                 status_code, result = run_forecast(
                     raw,
