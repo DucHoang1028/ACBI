@@ -25,6 +25,73 @@ PERIOD_KEYS = ("period", "start_date", "end_date")
 FILL_KEYS = ("metric_id", "dimension", "territory", "series_dimension", "limit")
 
 
+FOLLOW_UP = (
+    r"\b(?:con|the con|vay|nua|trong do|o do|cua no|nhu tren|tuong tu|"
+    r"what about|how about|same|those|instead|and)\b"
+)
+
+
+def is_standalone(question: str, hints: dict[str, object]) -> bool:
+    """True when the question names its own metric and period and leans on nothing.
+
+    "Doanh thu năm 2024" asked after a France-versus-Germany answer is a new
+    question: territory, factory and breakdown of the earlier turn must not leak in."""
+    value = fold(question)
+    named_period = bool(hints.get("period") or hints.get("start_date"))
+    return (
+        bool(hints.get("metric_id"))
+        and named_period
+        and not re.search(FOLLOW_UP, value)
+        and not value.startswith(("chi ", "only "))
+    )
+
+
+COMPARING = r"\b(?:so voi|so sanh|compare|versus|vs|hon)\b"
+RANKING = (
+    r"\b(?:cao nhat|thap nhat|nhieu nhat|it nhat|lon nhat|nho nhat|top|tang|giam|"
+    r"tot nhat|kem nhat|highest|lowest|best|worst|trend)\b"
+)
+
+
+def says_something(
+    question: str, hints: dict[str, object], prior: dict[str, Any] | None
+) -> bool:
+    """True when the message itself names a metric, period, member, breakdown or
+    follow-up, or answers a pending question; a bare vague request says nothing."""
+    value = fold(question)
+    vocab = vocabulary.get()
+    return bool(
+        hints
+        or (prior or {}).get("pending_question")
+        or is_confirmation(question)
+        or re.search(r"\d", value)
+        or re.search(FOLLOW_UP, value)
+        or re.search(RANKING, value)
+        or vocab.match_metrics(value)
+        or vocab.match_members(value)
+        or vocab.match_dimensions(value)
+    )
+
+
+def drop_inherited(
+    current: dict[str, Any], slots: dict[str, Any], question: str, hints: dict[str, Any]
+) -> None:
+    """Clear filters copied from earlier turns that this question never says."""
+    vocab = vocabulary.get()
+    value = fold(question)
+    members = vocab.match_members(value)
+    named = {
+        "territory": bool(hints.get("territory") or members.get("sales_territory")),
+        "factory_id": bool(members.get("factory")),
+        "dimension": bool(hints.get("dimension") or vocab.match_dimensions(value)),
+    }
+    for key, was_named in named.items():
+        if was_named or slots.get(key) in (None, "none"):
+            continue
+        if current.get(key) == slots[key]:
+            current[key] = "none" if key == "dimension" else None
+
+
 def merged_intent(
     intent: Intent, prior: dict[str, Any] | None, question: str = ""
 ) -> Intent:
@@ -33,6 +100,20 @@ def merged_intent(
     slots = dict((prior or {}).get("slots") or {})
     current = intent.model_dump()
     hints = intent_hints(question)
+    standalone = is_standalone(question, hints)
+    if standalone:
+        drop_inherited(current, slots, question, hints)
+    if question and not says_something(question, hints, prior):
+        # "cho tôi xem số liệu": whatever the model copied from context is not asked.
+        return intent.model_copy(
+            update={
+                "needs_clarification": True,
+                "metric_id": None,
+                "period": None,
+                "clarification_question": None,
+                "missing_fields": ["metric_id"],
+            }
+        )
     adds_information = bool(
         hints
         or intent.metric_id
@@ -64,10 +145,46 @@ def merged_intent(
                 current[key] = hints[key]
         elif key in override or current.get(key) in (None, "none"):
             current[key] = hints[key]
+    earlier = slots.get("territory")
+    comparing = bool(re.search(COMPARING, fold(question)))
+    if (
+        not standalone
+        and comparing
+        and earlier
+        and current.get("territory")
+        and set(str(current["territory"]).split("|")).isdisjoint(earlier.split("|"))
+    ):
+        current["territory"] = f"{earlier}|{current['territory']}"
+    if (
+        not standalone
+        and comparing
+        and len(str(current.get("territory") or "").split("|")) > 1
+        and current["dimension"] in {"none", "month", "week", "day"}
+        and not re.search(r"\b(?:thang|tuan|ngay|month|week|day)\b", fold(question))
+    ):
+        current["dimension"] = "sales_territory"  # one row per territory compared
     for field in ("metric_id", "period", "factory_id", "territory"):
+        if standalone and field in ("factory_id", "territory"):
+            continue
         if current[field] is None:
             current[field] = slots.get(field)
-    if current["dimension"] == "none" and slots.get("dimension") not in (None, "none"):
+    metric = vocabulary.get().metrics.get(str(current.get("metric_id")))
+    if metric and not hints.get("territory") and not intent.territory:
+        # A territory kept from a revenue answer means nothing for production.
+        if "sales_territory" not in metric.dimensions:
+            current["territory"] = None
+        if "factory" not in metric.dimensions and not intent.factory_id:
+            current["factory_id"] = None
+    kept = str(slots.get("dimension"))
+    splits = not metric or kept in metric.dimensions
+    grain = kept in {"day", "week", "month"} and "date" in metric.dimensions
+    splits = splits or grain
+    if (
+        not standalone
+        and current["dimension"] == "none"
+        and slots.get("dimension") not in (None, "none")
+        and splits
+    ):
         current["dimension"] = slots["dimension"]
     if current["period"] == "explicit" and not hints and intent.period is None:
         for field in ("start_date", "end_date"):
@@ -122,6 +239,84 @@ def _means_every_member(text: str) -> bool:
     return bool(tokens) and all(t in words or t in ALL_WORDS for t in tokens)
 
 
+OPTION = re.compile(
+    r"\((\d)\)\s*(.+?)(?=(?:,?\s*(?:hay|or|and|và)\s*)?\(\d\)|\?|$)", re.S
+)
+FIRST = r"\b(?:dau tien|cai dau|cau dau|first|ca hai|ca 2|both|tat ca)\b"
+SECOND = r"\b(?:thu hai|cai sau|cau sau|second)\b"
+
+
+def chosen_option(reply: str, pending: str | None) -> str | None:
+    """The offered choice a short reply picks: "1 đi", "cái đầu tiên", "cả 2".
+
+    A clarification that offers "(1) ... hay (2) ..." is answered by naming one; the
+    reply then stands for that option's text. "Both" takes the first and leaves
+    the other for the next turn."""
+    options = {int(n): t.strip(" ,.;:") for n, t in OPTION.findall(pending or "")}
+    if len(options) < 2:
+        return None
+    folded = fold(reply).strip(" .!?")
+    if len(folded.split()) > 10:
+        return None
+    digits = set(re.findall(r"\d+", folded))
+    if re.search(SECOND, folded):
+        number = 2
+    elif re.search(FIRST, folded):  # "cả 2" means both: start with the first
+        number = 1
+    elif len(digits) == 1 and int(next(iter(digits))) in options:
+        number = int(next(iter(digits)))
+    else:
+        return None  # another number or no number: a new request, not a choice
+    return options.get(number)
+
+
+LATER = (
+    r"\b(?:tiep|con lai|cai kia|cai sau|thu hai|thu 2|ca hai|ca 2|both|tat ca|"
+    r"yeu cau 2|cau 2|so 2|next|rest)\b"
+)
+
+
+def next_deferred(
+    reply: str, prior: dict[str, Any] | None
+) -> tuple[str | None, list[str]]:
+    """The request left for later that a short reply asks for ("tiếp đi").
+
+    Returns its text and the requests still waiting after it."""
+    later = list(((prior or {}).get("slots") or {}).get("deferred_requests") or [])
+    folded = fold(reply).strip(" .!?")
+    if not later or len(folded.split()) > 10 or not re.search(LATER, folded):
+        return None, []
+    return later[0], later[1:]
+
+
+def resume_pending(intent: Intent, prior: dict[str, Any] | None) -> Intent:
+    """Keep the kind of an unresolved request while its clarification is answered.
+
+    Without this, answering "which period?" for a forecast would run a plain query
+    for that period instead."""
+    pending = (prior or {}).get("pending_question")
+    waiting = ((prior or {}).get("slots") or {}).get("intent_type")
+    if pending and waiting == "forecast" and intent.intent_type in DATA_TYPES:
+        return intent.model_copy(update={"intent_type": "forecast"})
+    return intent
+
+
+def unstick(question: str, prior: dict[str, Any] | None, language: str) -> str:
+    """Ask differently when the same question would be put to the user twice."""
+    pending = ((prior or {}).get("pending_question") or "").strip()
+    if not pending or fold(pending) != fold(question.strip()):
+        return question
+    return (
+        "Tôi vẫn chưa hiểu ý bạn. Hãy nêu lại yêu cầu trong một câu, gồm chỉ số, "
+        "khoảng thời gian và cách chia nhóm. Ví dụ: “Doanh thu theo khu vực từ "
+        "01/01/2022 đến 30/06/2025”."
+        if language == "vi"
+        else "I still do not understand. Please restate the request in one sentence "
+        "with the metric, the period and the breakdown, for example: “Revenue by "
+        "territory from 2022-01-01 to 2025-06-30”."
+    )
+
+
 def validate_choices(intent: Intent, question: str) -> Intent:
     """Canonical territory names; ask when a factory or territory is not in the data."""
     current = intent.model_dump()
@@ -140,7 +335,11 @@ def _unknown_choice(current: dict[str, Any], question: str) -> str | None:
     vocab = vocabulary.get()
     if vocab.unknown_member_reference(fold(question)):
         return "factory_id"
+    deferred = bool(current.get("deferred_requests"))
+    named = vocab.match_members(fold(question))
     for dimension, _ in vocab.capitalised_after_dimension(question):
+        if deferred and named.get(dimension):
+            continue  # a known member named in a request that waits for its turn
         if dimension == "sales_territory" and not current.get("territory"):
             return "territory"  # named after a dimension word, yet no filter was set
         if dimension == "factory" and current.get("factory_id") is None:

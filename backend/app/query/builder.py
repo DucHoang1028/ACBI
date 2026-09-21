@@ -2,7 +2,7 @@
 """Trusted SQL templates for approved definitions. User values are parameters."""
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from app.ai.client import Intent
@@ -35,10 +35,14 @@ class QueryPlan:
 
 def resolve_dates(intent: Intent, anchor: date) -> tuple[date, date]:
     if intent.period == "explicit":
-        if not intent.start_date or not intent.end_date:
+        if not intent.start_date:
             raise ValueError("Specify both start and end dates")
-        start, end = date.fromisoformat(intent.start_date), date.fromisoformat(
-            intent.end_date
+        start = date.fromisoformat(intent.start_date)
+        # An open end ("from 2022 onwards") runs through the latest data.
+        end = (
+            date.fromisoformat(intent.end_date)
+            if intent.end_date
+            else anchor + timedelta(days=1)
         )
     elif intent.period:
         start, end = resolve_period(intent.period, anchor)

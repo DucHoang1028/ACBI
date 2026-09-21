@@ -186,6 +186,25 @@ def is_confirmation(question: str) -> bool:
     }
 
 
+COMPARE_WORDS = (
+    r"\b(?:so voi|so sanh|compare|vs|tang truong|growth|chenh lech|tang bao nhieu|"
+    r"giam bao nhieu)\b"
+)
+
+
+def compares_two_periods(question: str) -> bool:
+    """Two calendar years set against each other, as in "Q1 2025 so với Q1 2024".
+
+    Growth exists only against the period just before the latest month or quarter,
+    so an arbitrary pair of periods cannot be answered and must not be guessed."""
+    value = fold(question)
+    years = set(re.findall(r"(?<!\d)(20\d{2})(?!\d)", value))
+    is_range = re.search(r"\b(?:tu|from)\b.*\b(?:den|to)\b", value) or re.search(
+        r"\d{4}-\d{2}-\d{2}", value
+    )
+    return len(years) >= 2 and bool(re.search(COMPARE_WORDS, value)) and not is_range
+
+
 def month_start(day: date, delta: int = 0) -> date:
     index = day.year * 12 + day.month - 1 + delta
     return date(index // 12, index % 12 + 1, 1)

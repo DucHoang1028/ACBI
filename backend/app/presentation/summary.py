@@ -6,7 +6,20 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.metadata import vocabulary
-from app.presentation.analysis import highlights
+from app.presentation.analysis import highlights, money, percent
+
+
+def named(row: dict[str, Any], metric_id: str) -> str:
+    """The group a one-row result is about (a product, a territory), when it has one."""
+    for key, value in row.items():
+        if (
+            isinstance(value, str)
+            and key != metric_id
+            and not key.lower().endswith("id")
+            and not re.fullmatch(r"[\d.\-]+", value)
+        ):
+            return value
+    return ""
 
 
 def factual(
@@ -41,7 +54,11 @@ def factual(
                     else " sản phẩm" if unit == "units" else ""
                 )
             )
-            return f"{label} từ {period_vi}: {formatted}{suffix}."
+            who = named(rows[0], metric_id)
+            return (
+                f"{label}{f' của {who}' if who else ''} từ {period_vi}: "
+                f"{formatted}{suffix}."
+            )
         return f"{label} từ {period_vi}: {len(rows)} nhóm. " + (
             highlights(metric_id, rows, "vi") or "Chi tiết trong bảng bên dưới."
         )
@@ -55,7 +72,11 @@ def factual(
             if unit == "source_currency"
             else " units" if unit == "units" else " ratio" if ratio else ""
         )
-        return f"{label}: {rows[0][metric_id]}{suffix} for {period}."
+        who = named(rows[0], metric_id)
+        return (
+            f"{label}{f' ({who})' if who else ''}: {rows[0][metric_id]}{suffix} "
+            f"for {period}."
+        )
     return f"{label} for {period}: {len(rows)} groups. " + (
         highlights(metric_id, rows, "en") or "Values are in the table."
     )
@@ -95,15 +116,16 @@ def share_text(
         return None
     if total <= 0 or not picked:
         return None
-    percent = (selected / total * 100).quantize(Decimal("0.01"))
+    share = percent(selected / total * 100, language, 2)
     label = ", ".join(str(r["territory"]) for r in picked)
     last = end - timedelta(days=1)
     if language == "vi":
         return (
-            f"Doanh thu của {label} là {selected:,.2f}, chiếm {percent}% tổng doanh "
-            f"thu {total:,.2f} của tất cả khu vực ({start} đến {last})."
+            f"Doanh thu của {label} là {money(selected, 'vi')}, chiếm {share} tổng "
+            f"doanh thu {money(total, 'vi')} của tất cả khu vực "
+            f"({start:%d/%m/%Y} đến {last:%d/%m/%Y})."
         )
     return (
-        f"Revenue for {label} is {selected:,.2f}, {percent}% of the {total:,.2f} "
-        f"total across all territories ({start} to {last})."
+        f"Revenue for {label} is {money(selected, 'en')}, {share} of the "
+        f"{money(total, 'en')} total across all territories ({start} to {last})."
     )

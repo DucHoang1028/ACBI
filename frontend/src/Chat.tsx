@@ -65,8 +65,8 @@ export function Chat({access,enabled,advancedEnabled,anchor,language,role}:{acce
   }
   const suggestions=role==='production'?(vi?['Sản lượng tháng này','Tỷ lệ phế phẩm quý trước']:['Production output this month','Defect rate last quarter']):(vi?['Doanh thu tháng này là bao nhiêu?','Doanh thu quý trước','Top 3 khu vực theo doanh thu tháng này']:['What is revenue this month?','Revenue last quarter','Top 3 territories by revenue this month']);
   function message(a:Answer){
-    if(!vi)return a.message;
-    const translated:Record<string,string>={ok:'',no_data:'Không có dữ liệu trong kỳ đã chọn.',denied:'Yêu cầu nằm ngoài quyền truy cập của bạn.',partial:'Đã có kết quả nhưng chưa lưu được.',technical_failure:'Không thể xử lý lúc này. Hãy thử lại sau ít phút.'};
+    if(!vi)return a.message==='AI service is busy'?'The AI service is busy. Please send the question again in about a minute.':a.message;
+    const translated:Record<string,string>={ok:'',no_data:'Không có dữ liệu trong kỳ đã chọn.',denied:'Yêu cầu nằm ngoài quyền truy cập của bạn.',partial:'Đã có kết quả nhưng chưa lưu được.',technical_failure:a.message==='AI service is busy'?'Hệ thống AI đang quá tải. Hãy gửi lại câu hỏi sau khoảng một phút.':'Không thể xử lý lúc này. Hãy thử lại sau ít phút.'};
     return a.status==='needs_clarification'?a.message:translated[a.status]??a.message;
   }
   function cell(value:unknown,key:string){

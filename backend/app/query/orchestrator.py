@@ -16,16 +16,22 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.ai.budget import RequestBudget
-from app.ai.client import FakeLLM, Intent
+from app.ai.client import FakeLLM, Intent, LLMBusy
 from app.conversation.dialogue import fallback, last_answer, reply_from_metadata
 from app.conversation.intent import (
+    chosen_option,
     clarification_text,
     local_intent,
     merged_intent,
+    next_deferred,
+    resume_pending,
+    unstick,
     validate_choices,
 )
 from app.conversation.service import get_context, next_turns, save_context
 from app.core.dates import (
+    compares_two_periods,
+    date_hints,
     is_share_question,
     mentions_time,
     metric_words,
@@ -35,7 +41,11 @@ from app.core.text import fold
 from app.history.service import audit, latest_in_conversation
 from app.history.service import save as save_result
 from app.metadata import vocabulary
-from app.presentation.analysis import analysis_kind, analyze
+from app.presentation.analysis import (
+    analysis_kind,
+    analyze,
+    fresh_request,
+)
 from app.presentation.charts import TABLE, VizConfig, validate_viz
 from app.presentation.contract import AskRequest, response
 from app.presentation.messages import Explained, friendly
@@ -63,6 +73,7 @@ from app.query.validation import (
 )
 
 logger = logging.getLogger("acbi.chat")
+BUSY_MESSAGE = "AI service is busy"
 
 
 def run_query(
@@ -172,6 +183,8 @@ def route_query(
 
 
 SLOT_FIELDS = (
+    "intent_type",
+    "horizon_months",
     "metric_id",
     "dimension",
     "period",
@@ -186,12 +199,32 @@ SLOT_FIELDS = (
 def carry_slots(prior: dict[str, Any] | None, intent: Intent) -> dict[str, Any]:
     """Slots after an unresolved turn: earlier context plus what this turn added."""
     slots = dict((prior or {}).get("slots") or {})
+    known = set(vocabulary.get().ids("factory").values())
     for name in SLOT_FIELDS:
         value = getattr(intent, name)
-        if value in (None, "none") or (name == "factory_id" and value not in (1, 2, 3)):
+        if name == "intent_type" and value != "forecast":
+            continue
+        if value in (None, "none") or (
+            name == "factory_id" and known and value not in known
+        ):
             continue
         slots[name] = value
     return slots
+
+
+def note_deferred(result: dict[str, Any], raw: Intent, language: str) -> None:
+    """Say plainly which requests in the message were not run, so none is dropped."""
+    if not raw.deferred_requests or result.get("status") not in {"ok", "no_data"}:
+        return
+    listed = "; ".join(raw.deferred_requests)
+    note = (
+        f"Tôi đã thực hiện yêu cầu đầu tiên. Chưa thực hiện: {listed}. "
+        "Hãy hỏi tiếp để tôi làm."
+        if language == "vi"
+        else f"I ran the first request. Not run yet: {listed}. Ask again and I will."
+    )
+    base = result.get("answer_text")
+    result["answer_text"] = f"{base} {note}" if base else note
 
 
 def persist(
@@ -214,6 +247,18 @@ def persist(
         result["status"] = "partial"
         result["message"] = "Answer ready, but saving failed"
         result["saved"] = False
+
+
+def horizon_to(question: str, first: date) -> int | None:
+    """Months from the first forecast month to the end of a period the user named.
+
+    "Forecast for 2026" means through December 2026; None when no period is named."""
+    named = date_hints(question).get("end_date")
+    if not named:
+        return None
+    last = date.fromisoformat(named) - timedelta(days=1)
+    months = (last.year - first.year) * 12 + last.month - first.month + 1
+    return months if months > 0 else None
 
 
 def run_dialogue(
@@ -241,6 +286,7 @@ def run_dialogue(
         anchor.isoformat(),
         budget,
         previous,
+        body.language,
     ) or fallback(mode, body.language, user["role"])
     status = "needs_clarification" if limitation else "ok"
     save_context(
@@ -271,14 +317,25 @@ def run_forecast(
 ) -> tuple[int, dict[str, Any]]:
     """Trend forecast of revenue or output from complete recorded months."""
     storage, settings, vi = state.storage, state.settings, body.language == "vi"
+
+    def ask_again(text_out: str) -> tuple[int, dict[str, Any]]:
+        """Ask one more detail and remember that a forecast is what is pending."""
+        text_out = unstick(text_out, prior, body.language)
+        save_context(
+            storage,
+            conversation_id,
+            user["id"],
+            carry_slots(prior, raw),
+            text_out,
+            next_turns(prior, body.question, text_out),
+        )
+        return 200, response(
+            "needs_clarification", text_out, request_id, conversation_id
+        )
+
     checked = validate_choices(raw, body.question)
     if checked.missing_fields:
-        return 200, response(
-            "needs_clarification",
-            clarification_text(checked, body.language),
-            request_id,
-            conversation_id,
-        )
+        return ask_again(clarification_text(checked, body.language))
     metric = raw.metric_id or ""
     if metric not in {"revenue", "production_output"}:
         text_out = (
@@ -288,9 +345,7 @@ def run_forecast(
             else "I can forecast revenue or production output only (ratios do not add "
             "up, so this method does not apply). Which one do you want?"
         )
-        return 200, response(
-            "needs_clarification", text_out, request_id, conversation_id
-        )
+        return ask_again(text_out)
     last_day = calendar.monthrange(anchor.year, anchor.month)[1]
     end = (
         anchor + timedelta(days=1) if anchor.day == last_day else anchor.replace(day=1)
@@ -323,16 +378,11 @@ def run_forecast(
     except PermissionError:
         raise
     except ValueError as error:
-        return 200, response(
-            "needs_clarification",
-            friendly(error, body.language),
-            request_id,
-            conversation_id,
-        )
+        return ask_again(friendly(error, body.language))
     rows = run_query(state.warehouse, plan, budget)
     months = [str(r["month"]) for r in rows]
     series = [float(r[metric]) for r in rows]
-    wanted = raw.horizon_months or 6
+    wanted = raw.horizon_months or horizon_to(body.question, end) or 6
     horizon, capped = min(wanted, 12), wanted > 12
     try:
         if not contiguous(months):
@@ -532,11 +582,38 @@ def answer(
                 storage, user["id"], conversation_id, user["role"]
             )
             previous = (latest or {}).get("payload") or {}
-            text_answer = (
-                analyze(follow, previous["table"], latest["metric_id"], body.language)
+            named = vocabulary.get().match_members(fold(body.question))
+            window = (previous.get("sources") or {}).get("parameters") or {}
+            share = (
+                share_text(
+                    previous.get("table") or [],
+                    named.get("sales_territory") or [],
+                    date.fromisoformat(str(window["start"])),
+                    date.fromisoformat(str(window["end"])),
+                    body.language,
+                )
+                if follow == "share" and named.get("sales_territory") and window
+                else None
+            )
+            shown = {fold(n) for names in named.values() for n in names}
+            picked = [
+                row
+                for row in previous.get("table") or []
+                if shown & {fold(str(v)) for v in row.values()}
+            ]
+            text_answer = share or (
+                analyze(
+                    follow,
+                    picked if len(picked) >= 2 else previous["table"],
+                    latest["metric_id"],
+                    body.language,
+                )
                 if latest
                 and previous.get("table")
                 and latest["metric_id"] in vocabulary.get().metrics
+                and not fresh_request(
+                    body.question, previous["table"], latest["metric_id"]
+                )
                 else None
             )
             if text_answer and latest:
@@ -612,15 +689,48 @@ def answer(
             )
             outcome = result["status"]
             return 200, result
+        if compares_two_periods(body.question):
+            outcome = "needs_clarification"
+            question = (
+                "Tôi chưa so sánh trực tiếp hai năm hoặc hai kỳ tùy chọn; tăng trưởng "
+                "chỉ tính cho tháng hoặc quý gần nhất so với kỳ liền trước. Hãy hỏi "
+                "doanh thu của từng kỳ (ví dụ “Doanh thu năm 2024”, “Doanh thu năm "
+                "2023”) hoặc xem theo tháng."
+                if body.language == "vi"
+                else "I cannot compare two arbitrary years or periods yet; growth is "
+                "only computed for the latest month or quarter against the one "
+                "before it. Ask for each period separately (for example “Revenue "
+                "2024”, “Revenue 2023”) or view it by month."
+            )
+            save_context(
+                storage,
+                conversation_id,
+                user["id"],
+                (prior or {}).get("slots") or {},
+                None,
+                next_turns(prior, body.question, question),
+            )
+            return 200, response(outcome, question, request_id, conversation_id)
         context = {
             "data_as_of": anchor.isoformat(),
             "slots": prior["slots"] if prior else {},
             "pending_question": prior.get("pending_question") if prior else None,
             "turns": (prior or {}).get("turns") or [],
         }
+        # A short reply that picks an offered option stands for that option's text.
+        asked = (
+            chosen_option(body.question, (prior or {}).get("pending_question"))
+            or body.question
+        )
+        later, waiting = next_deferred(body.question, prior)
+        if later:
+            asked = later
         raw = (
-            local_intent(body.question) if settings.local_intent_enabled else None
-        ) or client.interpret(body.question, context, budget)
+            local_intent(asked) if settings.local_intent_enabled else None
+        ) or client.interpret(asked, context, budget)
+        if later:
+            raw = raw.model_copy(update={"deferred_requests": waiting})
+        raw = resume_pending(raw, prior)
         if raw.intent_type in {"chat", "metadata", "unsupported"}:
             outcome, result = run_dialogue(
                 raw,
@@ -683,9 +793,10 @@ def answer(
                     request_id,
                     conversation_id,
                 )
+            note_deferred(result, raw, body.language)
             outcome = result["status"]
             return status_code, result
-        intent = merged_intent(raw, prior, body.question)
+        intent = merged_intent(raw, prior, asked)
         if (
             intent.dimension == "none"
             and intent.series_dimension == "none"
@@ -704,6 +815,37 @@ def answer(
                 prior,
             )
             return 200, result
+        growth_note = None
+        if intent.metric_id == "sales_growth" and intent.period not in {
+            "last_month",
+            "last_quarter",
+            "this_month",
+            "this_quarter",
+        }:
+            # Trend of the base metric by month; a breakdown becomes the series.
+            split = intent.dimension not in {"none", "month"}
+            intent = intent.model_copy(
+                update={
+                    "metric_id": "revenue",
+                    "dimension": "month",
+                    "series_dimension": (
+                        intent.dimension if split else intent.series_dimension
+                    ),
+                }
+            )
+            growth_note = (
+                "Tăng trưởng theo kỳ liền trước chỉ tính cho tháng hoặc quý gần "
+                "nhất, nên đây là doanh thu theo tháng để thấy xu hướng."
+                if body.language == "vi"
+                else "Growth against the previous period exists only for the latest "
+                "month or quarter, so this is revenue by month to show the trend."
+            )
+        if intent.dimension in {"day", "week", "month"} and intent.limit < 250:
+            # Rows come in date order: "the highest month" cannot be cut to one row.
+            intent = intent.model_copy(update={"limit": 250})
+        if intent.series_dimension != "none" and intent.limit < 250:
+            # A stacked chart needs every group: the default cap would cut it short.
+            intent = intent.model_copy(update={"limit": 250})
         metric_id = intent.metric_id
         share_of: list[str] | None = None
         if intent.territory and is_share_question(body.question):
@@ -725,7 +867,7 @@ def answer(
                 )
             except ValueError as error:
                 outcome = "needs_clarification"
-                question = friendly(error, body.language)
+                question = unstick(friendly(error, body.language), prior, body.language)
                 save_context(
                     storage,
                     conversation_id,
@@ -742,7 +884,9 @@ def answer(
             or intent.period == "recently"
         ):
             outcome = "needs_clarification"
-            question = clarification_text(intent, body.language)
+            question = unstick(
+                clarification_text(intent, body.language), prior, body.language
+            )
             save_context(
                 storage,
                 conversation_id,
@@ -792,7 +936,7 @@ def answer(
             )
         except ValueError as error:
             outcome = "needs_clarification"
-            question = friendly(error, body.language)
+            question = unstick(friendly(error, body.language), prior, body.language)
             save_context(
                 storage,
                 conversation_id,
@@ -886,6 +1030,9 @@ def answer(
                 except (httpx.HTTPError, RuntimeError, ValueError, KeyError):
                     logger.warning("Request %s summary fell back", request_id)
         result["llm_calls"] = budget.calls
+        if growth_note:
+            result["answer_text"] = f"{result['answer_text']} {growth_note}"
+        note_deferred(result, raw, body.language)
         persist(
             storage,
             user["id"],
@@ -897,6 +1044,11 @@ def answer(
         return 200, result
     except HTTPException:
         raise
+    except LLMBusy:
+        logger.warning("Request %s: AI provider rate limited", request_id)
+        return 503, response(
+            "technical_failure", BUSY_MESSAGE, request_id, conversation_id
+        )
     except (
         SQLAlchemyError,
         httpx.HTTPError,

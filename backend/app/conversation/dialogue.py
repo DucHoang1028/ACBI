@@ -16,6 +16,7 @@ from app.query.validation import allowed_tables
 
 logger = logging.getLogger("acbi.chat")
 NUMBER = re.compile(r"\d[\d.,]*\d|\d")
+FOREIGN_SCRIPT = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]")
 
 
 def last_answer(saved: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -139,6 +140,7 @@ def reply_from_metadata(
     data_as_of: str,
     budget: RequestBudget,
     previous: dict[str, Any] | None = None,
+    language: str = "vi",
 ) -> str | None:
     refs = references(role, data_as_of)
     if previous:
@@ -151,6 +153,13 @@ def reply_from_metadata(
     if not text or not grounded(text, refs, question):
         logger.warning("dialogue reply dropped: empty or quotes an unknown number")
         return None
+    if FOREIGN_SCRIPT.search(text):
+        logger.warning("dialogue reply dropped: wrong script")
+        return None
+    for metric in vocabulary.get().metrics.values():  # ids are not for people
+        name = metric.label(language)
+        text = text.replace(f"{name} ({metric.id})", name)
+        text = text.replace(metric.id, name.lower())
     return text
 
 

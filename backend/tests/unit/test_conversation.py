@@ -399,3 +399,265 @@ def test_growth_wording_settles_the_metric_even_when_the_model_reads_revenue() -
     assert plain.metric_id == "defect_rate"
     assert "metric_override" not in intent_hints("Doanh thu tháng này")
     assert is_confirmation("Đúng vậy") and is_confirmation("ok")
+
+
+def test_an_open_ended_period_runs_through_the_latest_data() -> None:
+    from datetime import date
+
+    from app.query.builder import resolve_dates
+
+    open_end = intent(period="explicit", start_date="2022-01-01", end_date=None)
+    assert resolve_dates(open_end, date(2025, 6, 29)) == (
+        date(2022, 1, 1),
+        date(2025, 6, 30),
+    )
+    with pytest.raises(ValueError):
+        resolve_dates(intent(period="explicit"), date(2025, 6, 29))
+
+
+def test_answering_a_clarification_resumes_the_request_and_never_repeats_it() -> None:
+    from datetime import date
+
+    from app.conversation.intent import resume_pending, unstick
+    from app.query.orchestrator import carry_slots, horizon_to
+
+    asked = intent(metric_id="production_output", intent_type="forecast")
+    slots = carry_slots(None, asked)
+    assert slots["intent_type"] == "forecast"
+    # Plain data requests are not remembered as a kind.
+    assert "intent_type" not in carry_slots(None, intent(intent_type="metric_query"))
+
+    prior = {"slots": slots, "pending_question": "Which period?"}
+    answer = intent(metric_id="production_output", intent_type="metric_query")
+    assert resume_pending(answer, prior).intent_type == "forecast"
+    assert resume_pending(answer, {"slots": {}, "pending_question": None}) is answer
+    assert resume_pending(answer, {"slots": slots, "pending_question": None}) is answer
+
+    same = "Bạn muốn xem kỳ nào?"
+    assert unstick(same, {"pending_question": same}, "vi") != same
+    assert unstick(same, {"pending_question": "khác"}, "vi") == same
+    assert unstick(same, None, "vi") == same
+
+    # "for 2026" means through December 2026, counted from the first forecast month.
+    assert horizon_to("năm 2026 đi", date(2025, 6, 1)) == 19
+    assert horizon_to("dự báo giúp tôi", date(2025, 6, 1)) is None
+
+
+def test_a_short_reply_picks_one_of_the_offered_options() -> None:
+    from app.conversation.intent import chosen_option
+
+    offered = (
+        "Bạn muốn làm yêu cầu nào trước: (1) xu hướng doanh thu của Úc, "
+        "hay (2) dự báo sản lượng? Vui lòng chọn một."
+    )
+    trend = "xu hướng doanh thu của Úc"
+    forecast = "dự báo sản lượng"
+    for reply in (
+        "1 đi",
+        "Cả 2 cùng lúc",
+        "cái đầu tiên",
+        "Thực hiện yêu cầu đầu tiên trước",
+    ):
+        assert chosen_option(reply, offered) == trend, reply
+    for reply in ("2", "số 2 nhé", "yêu cầu thứ hai"):
+        assert chosen_option(reply, offered) == forecast, reply
+    # Anything else is a new message, and without options there is nothing to pick.
+    assert chosen_option("doanh thu năm 2024", offered) is None
+    assert chosen_option("1 đi", "Bạn muốn xem kỳ nào?") is None
+    assert chosen_option("1 đi", None) is None
+
+
+def test_tolerant_option_picking_and_a_new_number_is_a_new_request() -> None:
+    from app.conversation.intent import chosen_option
+
+    offered = "Chọn: (1) xu hướng doanh thu, hay (2) dự báo sản lượng?"
+    for reply in ("1 trước đi", "Thực hiện yêu cầu 1 trước", "làm cái 1 nhé"):
+        assert chosen_option(reply, offered) == "xu hướng doanh thu", reply
+    assert chosen_option("doanh thu năm 2024 của 3 nhà máy", offered) is None
+    assert chosen_option("3", offered) is None
+
+
+def test_requests_left_for_later_are_named_in_the_answer() -> None:
+    from app.query.orchestrator import note_deferred
+
+    raw = intent(deferred_requests=["dự báo sản lượng 3 tháng"])
+    result = {"status": "ok", "answer_text": "Doanh thu là 10."}
+    note_deferred(result, raw, "vi")
+    assert "dự báo sản lượng 3 tháng" in result["answer_text"]
+    assert result["answer_text"].startswith("Doanh thu là 10.")
+    refused = {"status": "denied", "message": "Không có quyền."}
+    note_deferred(refused, raw, "vi")
+    assert "answer_text" not in refused
+    untouched = {"status": "ok", "answer_text": "Xong."}
+    note_deferred(untouched, intent(), "vi")
+    assert untouched["answer_text"] == "Xong."
+
+
+def test_a_short_reply_asks_for_the_request_left_for_later() -> None:
+    from app.conversation.intent import next_deferred
+
+    prior = {"slots": {"deferred_requests": ["dự báo sản lượng", "so sánh nhà máy"]}}
+    for reply in ("tiếp đi", "Cả 2 cùng lúc", "Bây giờ thực hiện yêu cầu thứ 2"):
+        assert next_deferred(reply, prior) == ("dự báo sản lượng", ["so sánh nhà máy"])
+    assert next_deferred("doanh thu năm 2024", prior) == (None, [])
+    assert next_deferred("tiếp đi", {"slots": {}}) == (None, [])
+    assert next_deferred("tiếp đi", None) == (None, [])
+
+
+def test_standalone_question_does_not_inherit_earlier_filters() -> None:
+    """France versus Germany in the last turn must not filter "Doanh thu năm 2024"."""
+    prior = {
+        "slots": intent(
+            dimension="sales_territory",
+            territory="France|Germany",
+            period="explicit",
+            start_date="2024-01-01",
+            end_date="2025-01-01",
+        ).model_dump()
+    }
+    copied = intent(
+        dimension="sales_territory",
+        territory="France|Germany",
+        needs_clarification=False,
+        clarification_question=None,
+        missing_fields=[],
+    )
+    resolved = merged_intent(copied, prior, "Doanh thu năm 2024 là bao nhiêu?")
+    assert resolved.territory is None
+    assert resolved.dimension == "none"
+    assert resolved.metric_id == "revenue"
+
+
+def test_short_follow_up_still_inherits_earlier_filters() -> None:
+    prior = {
+        "slots": intent(
+            dimension="sales_territory",
+            territory="Canada",
+            period="explicit",
+            start_date="2024-01-01",
+            end_date="2025-01-01",
+        ).model_dump()
+    }
+    resolved = merged_intent(
+        intent(metric_id=None, missing_fields=[]), prior, "Còn năm 2023 thì sao?"
+    )
+    assert resolved.territory == "Canada"
+
+
+def test_named_factory_in_a_deferred_request_is_not_an_unknown_factory() -> None:
+    raw = intent(
+        territory="Canada",
+        period="last_month",
+        needs_clarification=False,
+        clarification_question=None,
+        missing_fields=[],
+        deferred_requests=["sản lượng Factory B"],
+    )
+    resolved = merged_intent(
+        raw, None, "Doanh thu Canada tháng trước, sản lượng Factory B"
+    )
+    assert not resolved.needs_clarification
+    assert resolved.territory == "Canada"
+
+
+def test_vague_message_does_not_replay_the_previous_query() -> None:
+    prior = {
+        "slots": intent(period="last_month", territory="Canada").model_dump(),
+        "turns": [],
+    }
+    copied = intent(
+        period="last_month",
+        territory="Canada",
+        needs_clarification=False,
+        clarification_question=None,
+        missing_fields=[],
+    )
+    assert merged_intent(copied, prior, "cho tôi xem số liệu").needs_clarification
+
+
+def test_comparing_with_another_territory_keeps_both() -> None:
+    prior = {
+        "slots": intent(
+            territory="Canada", period="last_year", dimension="month"
+        ).model_dump()
+    }
+    raw = intent(
+        territory="Australia",
+        period="last_year",
+        needs_clarification=False,
+        clarification_question=None,
+        missing_fields=[],
+    )
+    resolved = merged_intent(raw, prior, "So với Úc thì ai cao hơn?")
+    assert set(resolved.territory.split("|")) == {"Canada", "Australia"}
+    assert resolved.dimension == "sales_territory"
+
+
+@pytest.mark.parametrize(
+    "question,expected",
+    [
+        ("Doanh thu Q1 2025 so với Q1 2024", True),
+        ("Tăng trưởng năm 2024 so với 2023 là bao nhiêu?", True),
+        ("Doanh thu năm 2024", False),
+        ("Doanh thu từ năm 2022 đến 2025 tăng trưởng thế nào", False),
+        ("Doanh thu Đức Pháp Anh Úc năm 2024 so sánh giúp mình", False),
+    ],
+)
+def test_two_period_comparison_is_detected(question: str, expected: bool) -> None:
+    from app.core.dates import compares_two_periods
+
+    assert compares_two_periods(question) is expected
+
+
+def test_comparison_wording_with_two_territories_breaks_down_by_territory() -> None:
+    prior = {"slots": intent(territory="Canada", dimension="month").model_dump()}
+    raw = intent(
+        territory="Canada|Australia",
+        dimension="month",
+        period="last_year",
+        needs_clarification=False,
+        clarification_question=None,
+        missing_fields=[],
+    )
+    resolved = merged_intent(raw, prior, "So với Úc thì ai cao hơn?")
+    assert resolved.dimension == "sales_territory"
+
+
+def test_one_row_result_names_its_group() -> None:
+    rows = [{"productid": 807, "product": "HL Headset", "defect_rate": "0.0080"}]
+    text = factual("defect_rate", rows, date(2024, 1, 1), date(2025, 1, 1), "vi")
+    assert "HL Headset" in text
+    assert "HL Headset" not in factual(
+        "revenue", [{"revenue": "10"}], date(2024, 1, 1), date(2025, 1, 1), "vi"
+    )
+
+
+def test_revenue_filters_are_not_inherited_by_production_output() -> None:
+    prior = {
+        "slots": intent(
+            territory="Canada", dimension="sales_territory", period="last_month"
+        ).model_dump()
+    }
+    raw = intent(
+        metric_id="production_output",
+        needs_clarification=False,
+        clarification_question=None,
+        missing_fields=[],
+    )
+    resolved = merged_intent(raw, prior, "Sản lượng của Factory B thì sao")
+    assert resolved.territory is None
+    assert resolved.dimension == "none"
+
+
+def test_share_text_uses_vietnamese_number_format() -> None:
+    from app.presentation.summary import share_text
+
+    rows = [
+        {"territory": "France", "revenue": "3816543.33"},
+        {"territory": "Germany", "revenue": "2570269.35"},
+        {"territory": "Canada", "revenue": "6231209.96"},
+    ]
+    text = share_text(rows, ["France"], date(2024, 1, 1), date(2025, 1, 1), "vi")
+    assert text is not None
+    assert "3.816.543,33" in text
+    assert "31/12/2024" in text

@@ -176,7 +176,7 @@ dimensions:
     Germany: [Đức, nước Đức]
     France: [Pháp, nước Pháp]
     Australia: [Úc, nước Úc]
-    United Kingdom: [nước Anh, Vương quốc Anh, UK, Anh Quốc]
+    United Kingdom: [Anh, nước Anh, Vương quốc Anh, UK, Anh Quốc]
   description: "sales.salesorderheader.territoryid -> sales.salesterritory.territoryid"
   approvalStatus: approved
 - dimensionId: production_line

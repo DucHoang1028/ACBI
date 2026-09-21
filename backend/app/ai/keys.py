@@ -53,6 +53,24 @@ class KeyPool:
                     usable.append(state)
         return usable
 
+    def wait_time(self, estimated: int) -> float:
+        """Seconds until some key has room again (infinite if none ever will)."""
+        now = time.monotonic()
+        best = float("inf")
+        with self.lock:
+            for state in self.states:
+                moments = [state.rest_until, *(at + 60 for at, _ in state.calls)]
+                for moment in sorted(max(m, now) for m in moments):
+                    live = [n for at, n in state.calls if at > moment - 60]
+                    if (
+                        moment >= state.rest_until
+                        and len(live) < state.rpm
+                        and sum(live) + estimated <= state.tpm
+                    ):
+                        best = min(best, moment - now)
+                        break
+        return best
+
     def reserve(self, state: KeyState, estimated: int) -> list[float]:
         reservation = [time.monotonic(), float(estimated)]
         with self.lock:

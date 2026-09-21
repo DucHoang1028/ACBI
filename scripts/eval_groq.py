@@ -198,6 +198,7 @@ def main() -> None:
             assert login.status_code == 200, user
             tokens[user] = {"Authorization": f"Bearer {login.json()['access_token']}"}
         conversations: dict[str, str] = {}
+        last_said: dict[str, str] = {}
         only = (
             set(sys.argv[sys.argv.index("--ids") + 1].split(","))
             if "--ids" in sys.argv
@@ -221,6 +222,11 @@ def main() -> None:
             problems = (check_golden if kind == "golden" else check_edge)(
                 item, body, anchor
             )
+            said_now = f"{body.get('answer_text') or ''} {body.get('message') or ''}"
+            if item.get("progress") and said_now.strip() == last_said.get(group, ""):
+                problems.append("repeated the previous answer verbatim")
+            if group:
+                last_said[group] = said_now.strip()
             report.append(
                 {
                     "suite": kind,

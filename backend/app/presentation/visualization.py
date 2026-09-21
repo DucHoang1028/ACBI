@@ -148,7 +148,10 @@ def chart(
     for _ in range(state.settings.llm_max_regenerations + 1):
         try:
             proposal = state.llm.visualize(question, describe(rows), error, budget)
-            return validate_viz(proposal, rows).model_dump(), False
+            checked = validate_viz(proposal, rows)
+            if len(rows) == 1 and checked.type in {"scatter", "bar", "line"}:
+                checked = auto_viz("kpi_card", rows)  # one value is a card, not a plot
+            return checked.model_dump(), False
         except (ValueError, ValidationError) as invalid:
             error = str(invalid)[:180]
         except (httpx.HTTPError, RuntimeError, KeyError, TypeError):

@@ -4,7 +4,7 @@ import httpx
 import pytest
 from app.ai import client as client_module
 from app.ai.budget import RequestBudget
-from app.ai.client import GroqClient, SummaryProposal
+from app.ai.client import GroqClient, LLMBusy, SummaryProposal
 from app.core.config import Settings
 
 REAL_CLIENT = httpx.Client
@@ -88,7 +88,7 @@ def test_all_keys_failing_raises_and_bad_request_does_not_rotate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     groq, seen = make(monkeypatch, {"k1": 429, "k2": 429, "k3": 429})
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(LLMBusy):  # a rate limit is a wait, not a failure
         ask(groq)
     assert seen == ["k1", "k2", "k3"]
 
@@ -126,3 +126,18 @@ def test_schema_failure_from_the_model_is_regenerated_not_fatal(
     )
     assert ask(GroqClient(settings)) == "second try"
     assert len(calls) == 2
+
+
+def test_wait_time_says_when_a_busy_key_has_room_again() -> None:
+    from app.ai.keys import KeyPool
+
+    pool = KeyPool(["a", "b"], rpm=2, tpm=1000)
+    assert pool.wait_time(100) == 0
+    for state in pool.states:
+        pool.reserve(state, 100)
+        pool.reserve(state, 100)
+    assert not pool.available(100)
+    assert 55 < pool.wait_time(100) <= 60  # the oldest call leaves the window
+    pool.failed(pool.states[0], 429, 5.0)
+    assert 55 < pool.wait_time(100) <= 60
+    assert pool.wait_time(5000) == float("inf")  # can never fit

@@ -8,6 +8,7 @@ import re
 from decimal import Decimal
 from typing import Any
 
+from app.core.dates import date_hints
 from app.core.text import fold
 from app.metadata import vocabulary
 from app.presentation.charts import describe, number
@@ -36,6 +37,43 @@ def analysis_kind(question: str) -> str | None:
         if re.search(pattern, value):
             return kind
     return "higher" if re.search(WHICH, value) else None
+
+
+def names_new_member(question: str, rows: list[dict[str, Any]]) -> bool:
+    """"So với Úc thì ai cao hơn?" names a member the result on screen lacks."""
+    shown = {fold(str(v)) for row in rows for v in row.values()}
+    for names in vocabulary.get().match_members(fold(question)).values():
+        if any(fold(name) not in shown for name in names):
+            return True
+    return False
+
+
+def fresh_request(question: str, rows: list[dict[str, Any]], metric: str) -> bool:
+    """True when a "follow-up" really asks for new figures, not a reading of the table.
+
+    It names a period of its own, a member the table lacks, or a unit the table is
+    not split by."""
+    value = fold(question)
+    return bool(
+        names_new_member(question, rows)
+        or asks_other_unit(question, rows, metric)
+        or date_hints(question)
+        or re.search(r"\d", value)
+    )
+
+
+def asks_other_unit(question: str, rows: list[dict[str, Any]], metric: str) -> bool:
+    """Asking which month over a table of territories is a new question."""
+    cols = columns(rows, metric)
+    if cols is None:
+        return False
+    value = fold(question)
+    by_month = cols[0] == "month"
+    if re.search(r"\b(?:thang nao|which month)\b", value):
+        return not by_month
+    if re.search(r"\b(?:nuoc nao|khu vuc nao|which (?:territory|country))\b", value):
+        return by_month
+    return False
 
 
 def columns(rows: list[dict[str, Any]], metric: str) -> tuple[str, str] | None:
