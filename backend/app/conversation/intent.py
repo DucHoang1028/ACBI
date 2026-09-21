@@ -337,9 +337,12 @@ def _unknown_choice(current: dict[str, Any], question: str) -> str | None:
         return "factory_id"
     deferred = bool(current.get("deferred_requests"))
     named = vocab.match_members(fold(question))
+    metric = vocab.metrics.get(str(current.get("metric_id")))
     for dimension, _ in vocab.capitalised_after_dimension(question):
         if deferred and named.get(dimension):
-            continue  # a known member named in a request that waits for its turn
+            continue
+        if metric and named.get(dimension) and dimension not in metric.dimensions:
+            continue  # a known member this metric cannot be split by: not this request
         if dimension == "sales_territory" and not current.get("territory"):
             return "territory"  # named after a dimension word, yet no filter was set
         if dimension == "factory" and current.get("factory_id") is None:

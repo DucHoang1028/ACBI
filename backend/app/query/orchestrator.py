@@ -28,7 +28,12 @@ from app.conversation.intent import (
     unstick,
     validate_choices,
 )
-from app.conversation.service import get_context, next_turns, save_context
+from app.conversation.service import (
+    get_context,
+    next_turns,
+    remember_answer,
+    save_context,
+)
 from app.core.dates import (
     compares_two_periods,
     date_hints,
@@ -1046,6 +1051,13 @@ def answer(
             authorize(intent, user["role"]),
             result,
         )
+        if rows and result.get("answer_text"):
+            try:
+                remember_answer(
+                    storage, conversation_id, user["id"], result["answer_text"]
+                )
+            except SQLAlchemyError:
+                logger.warning("Request %s answer not kept in context", request_id)
         return 200, result
     except HTTPException:
         raise

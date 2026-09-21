@@ -76,3 +76,18 @@ def next_turns(
     turns = list((prior or {}).get("turns") or [])
     turns.append({"question": question, "answer": answer_text or ""})
     return turns[-6:]
+
+
+def remember_answer(
+    engine: Engine, conversation_id: str, user_id: int, answer_text: str
+) -> None:
+    """Keep what the last turn answered, so "the top region" can be resolved later."""
+    with engine.begin() as connection:
+        connection.execute(
+            text("""
+            UPDATE chat_context
+            SET turns=jsonb_set(turns,'{-1,answer}',to_jsonb(CAST(:answer AS text)))
+            WHERE id=:id AND user_id=:user_id AND jsonb_array_length(turns)>0
+        """),
+            {"id": conversation_id, "user_id": user_id, "answer": answer_text[:400]},
+        )

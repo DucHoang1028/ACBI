@@ -15,7 +15,9 @@ from app.presentation.charts import TABLE, VizConfig, describe, validate_viz
 
 CHART_WORDS = (
     r"\b(?:bieu do|chart|kpi|the chi so|kieu|as a|table|stacked|scatter|"
-    r"dang (?:bieu do|bang|cot|duong|tron|vanh|xep|diem))\b"
+    r"dang (?:bieu do|bang|cot|duong|tron|vanh|xep|diem)|"
+    r"(?:ve|chuyen sang|doi sang|doi thanh|hien thi|xem) (?:dang )?"
+    r"(?:duong|cot|tron|vanh khuyen|bang|phan tan|line|pie|bar|donut))\b"
 )
 
 
@@ -103,13 +105,17 @@ def reshaped(
     except ValueError:
         pass
     if kind != "bar":
+        why = {
+            "line": ("cần trục thời gian như tháng hoặc ngày", "it needs a time axis"),
+            "scatter": ("cần hai cột số", "it needs two numeric columns"),
+        }.get(kind, ("ví dụ quá nhiều nhóm", "for example too many categories"))
         try:
             return auto_viz("bar", rows).model_dump(), (
-                f"Kết quả này không phù hợp với {names[kind]} (ví dụ quá nhiều nhóm), "
+                f"Kết quả này không phù hợp với {names[kind]} ({why[0]}), "
                 "nên tôi hiển thị dạng biểu đồ cột."
                 if vi
-                else f"This result does not fit a {names[kind]} (for example too many "
-                "categories), so I am showing a bar chart."
+                else f"This result does not fit a {names[kind]} ({why[1]}), so I am "
+                "showing a bar chart."
             )
         except ValueError:
             pass

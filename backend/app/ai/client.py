@@ -364,6 +364,9 @@ class GroqClient:
             "'còn năm 2023?' or 'chỉ Canada'. A vague message that names no metric, "
             "period, filter or breakdown ('cho tôi xem số liệu') is "
             "needs_clarification: never replay the previous query. "
+            "A phrase that points back at the last answer ('khu vực đứng đầu', 'nhà "
+            "máy thấp nhất', 'cái cao nhất', 'the top one') names a member: read it "
+            "from the answers in context.turns and set territory or factory_id to it. "
             "context.slots holds the previous intent, context.pending_question the last "
             "clarification and context.turns recent requests and replies. A short "
             "confirmation ('đúng vậy', 'go ahead') means run the unresolved earlier "
@@ -627,10 +630,12 @@ class GroqClient:
                     retry_after = _retry_after(failure.response.headers)
                     self.pool.failed(state, status, retry_after)
                     logger.warning(
-                        "llm %s failed on %s: HTTP %s; trying next key",
+                        "llm %s failed on %s: HTTP %s (retry after %s); %s",
                         name,
                         state.label,
                         status,
+                        retry_after,
+                        failure.response.text[:160],
                     )
                     error = failure
                 except httpx.TransportError as failure:

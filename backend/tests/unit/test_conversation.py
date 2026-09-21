@@ -684,3 +684,34 @@ def test_chart_type_follows_the_shape_of_the_result() -> None:
     assert pick_viz(stacked, "revenue", False).type == "stacked_bar"
     five = [{"territory": f"T{i}", "revenue": str(i + 1)} for i in range(5)]
     assert pick_viz(five, "revenue", False).type == "donut"
+
+
+@pytest.mark.parametrize(
+    "question,kind",
+    [
+        ("Vẽ đường", "line"),
+        ("vẽ biểu đồ tròn cho tôi", "pie"),
+        ("Chuyển sang cột chồng", "stacked_bar"),
+        ("đổi sang vành khuyên", "donut"),
+    ],
+)
+def test_short_chart_requests_are_recognised(question: str, kind: str) -> None:
+    from app.presentation.visualization import reshape_kind
+
+    assert reshape_kind(question) == kind
+
+
+def test_factory_named_beside_a_revenue_request_is_not_unknown() -> None:
+    raw = intent(
+        territory="Canada",
+        period="explicit",
+        start_date="2024-01-01",
+        end_date="2025-01-01",
+        needs_clarification=False,
+        clarification_question=None,
+        missing_fields=[],
+    )
+    resolved = merged_intent(
+        raw, None, "Doanh thu của Canada năm 2024 và sản lượng Factory B tháng trước"
+    )
+    assert not resolved.needs_clarification
