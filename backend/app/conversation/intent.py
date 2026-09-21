@@ -128,6 +128,19 @@ EVALUATIVE = re.compile(
 WHICH = re.compile(r"\b((?:[a-z]+\s){1,2})nao\b|\bwhich\s+((?:[a-z]+\s?){1,2})")
 
 
+BY = re.compile(r"\b(?:theo|by|per|moi|tung|each)\s+((?:[a-z]+\s?){1,3})")
+
+
+def _by_dimension(current: dict[str, Any], question: str) -> None:
+    """"Theo nhà máy" in the first task asks for that split, whatever the model kept."""
+    if current["dimension"] != "none":
+        return
+    match = BY.search(fold(first_clause(question)))
+    named = vocabulary.get().match_dimensions("theo " + match.group(1)) if match else []
+    if len(named) == 1:
+        current["dimension"] = named[0]
+
+
 def _which_dimension(current: dict[str, Any], intent: Intent, question: str) -> None:
     """"Nhà máy nào ...?" asks about every factory: no factory filter, split by it."""
     value = fold(question)
@@ -176,6 +189,13 @@ def merged_intent(
     slots = dict((prior or {}).get("slots") or {})
     current = intent.model_dump()
     hints = intent_hints(question)
+    if len(vocabulary.get().match_metrics(fold(question))) > 1 or further_requests(
+        question
+    ):
+        # Several tasks: the first one's own period wins over the later ones'.
+        head = intent_hints(first_clause(question))
+        if head.get("period") or head.get("start_date"):
+            hints = {**hints, **{k: v for k, v in head.items() if k in PERIOD_KEYS}}
     standalone = is_standalone(question, hints)
     if standalone:
         drop_inherited(current, slots, question, hints)
@@ -190,6 +210,7 @@ def merged_intent(
                 "missing_fields": ["metric_id"],
             }
         )
+    _by_dimension(current, question)
     _which_dimension(current, intent, question)
     _those_members(current, slots, intent, question)
     if EVALUATIVE.search(fold(question)) and not vocabulary.get().match_metrics(
@@ -615,10 +636,28 @@ def further_requests(question: str) -> list[str]:
             break
     later = [
         original
-        for part, original in zip(parts, originals)
-        if (found := set(vocab.match_metrics(part))) and found != first
+        for index, (part, original) in enumerate(zip(parts, originals))
+        if index
+        and (
+            re.search(TASK_WORDS, part)
+            or (re.search(RANK_WORDS, part) and re.search(OWN_PERIOD, part))
+            or ((found := set(vocab.match_metrics(part))) and found != first)
+        )
     ]
     return later[:4]
+
+
+TASK_WORDS = r"\b(?:du bao|forecast|so sanh|compare)\b"
+RANK_WORDS = r"\b(?:top\s*\d+|ban chay)\b"  # a task only with a period of its own
+OWN_PERIOD = r"\b(?:nam\s+\d{4}|thang\s+\d{1,2}|quy\s+\d|(?:this|last)\s+\w+)\b|" + (
+    RELATIVE_PERIOD
+)
+
+
+def first_clause(question: str) -> str:
+    """The first task of a message, whose own wording sets its period."""
+    parts = [p for p in SPLIT.split(question) if p.strip()]
+    return parts[0] if parts else question
 
 
 def first_metric(question: str) -> str | None:

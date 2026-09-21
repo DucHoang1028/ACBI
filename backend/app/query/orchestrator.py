@@ -763,16 +763,16 @@ def answer(
         ) or client.interpret(asked, context, budget)
         if later:
             raw = raw.model_copy(update={"deferred_requests": waiting})
-        elif not raw.deferred_requests:
-            extra = further_requests(body.question)
-            if extra:  # the model ran the first task and forgot to list the rest
+        else:
+            extra = raw.deferred_requests or further_requests(body.question)
+            if extra:  # several tasks: run the first one, list the rest
                 update: dict[str, Any] = {"deferred_requests": extra}
                 if raw.intent_type in DATA_KINDS and (
-                    raw.metric_id is None or "metric_id" in raw.missing_fields
+                    raw.metric_id is None or raw.needs_clarification
                 ):
-                    # It asked "which metric?" though the first task is plain.
+                    # It asked "which one?" though the first task is plain.
                     update.update(
-                        metric_id=first_metric(body.question),
+                        metric_id=raw.metric_id or first_metric(body.question),
                         needs_clarification=False,
                         clarification_question=None,
                         missing_fields=[],

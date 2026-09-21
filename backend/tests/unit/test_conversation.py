@@ -863,3 +863,63 @@ def test_a_later_still_clause_does_not_make_the_message_a_follow_up() -> None:
     question = "Doanh thu tháng này bao nhiêu, còn tháng trước thì sao"
     resolved = merged_intent(raw, prior, question)
     assert resolved.dimension == "none" and resolved.limit == 100
+
+
+def test_first_task_sets_its_own_period_in_a_multi_task_message() -> None:
+    prior = {
+        "slots": intent(
+            period="explicit", start_date="2024-01-01", end_date="2025-01-01"
+        ).model_dump()
+    }
+    raw = intent(
+        period="explicit",
+        start_date="2024-01-01",
+        end_date="2025-01-01",
+        needs_clarification=False,
+        clarification_question=None,
+        missing_fields=[],
+    )
+    question = (
+        "Doanh thu quý trước, sản lượng tháng trước và dự báo doanh thu 3 tháng tới"
+    )
+    resolved = merged_intent(raw, prior, question)
+    assert resolved.period == "last_quarter"
+
+
+def test_a_forecast_clause_of_the_same_metric_is_a_later_task() -> None:
+    from app.conversation.intent import further_requests
+
+    later = further_requests(
+        "Doanh thu quý trước, sản lượng tháng trước và dự báo doanh thu 3 tháng tới"
+    )
+    assert len(later) == 2 and "dự báo" in later[1]
+
+
+def test_a_named_split_in_the_first_task_is_kept() -> None:
+    raw = intent(
+        metric_id="on_time_rate",
+        period="last_quarter",
+        needs_clarification=False,
+        clarification_question=None,
+        missing_fields=[],
+    )
+    question = "đúng hạn theo nhà máy quý trước, sau đó phế phẩm theo nhà máy cùng kỳ"
+    assert merged_intent(raw, None, question).dimension == "factory"
+    plain = "sản lượng của Factory B quý trước"
+    assert merged_intent(raw, None, plain).dimension == "none"
+
+
+def test_a_top_n_clause_without_a_metric_is_still_a_later_task() -> None:
+    from app.conversation.intent import further_requests
+
+    later = further_requests(
+        "cho mình xem sản lượng của Factory B tháng trước và top 3 sản phẩm bán chạy "
+        "năm 2024"
+    )
+    assert later == ["top 3 sản phẩm bán chạy năm 2024"]
+
+
+def test_a_bare_top_n_refinement_is_not_a_separate_task() -> None:
+    from app.conversation.intent import further_requests
+
+    assert further_requests("Doanh thu quý trước, chia theo khu vực, top 3, cột") == []
