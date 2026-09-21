@@ -555,7 +555,21 @@ class GroqClient:
                     )
                 except httpx.HTTPStatusError as failure:
                     status = failure.response.status_code
+                    if (
+                        status == 400
+                        and "json_validate_failed" in failure.response.text
+                    ):
+                        # The model wrote output that broke the schema: regenerate.
+                        logger.warning("llm %s output failed schema validation", name)
+                        error = ValueError("model output failed schema validation")
+                        break
                     if status in (400, 404, 413, 422):
+                        logger.warning(
+                            "llm %s rejected with HTTP %s: %s",
+                            name,
+                            status,
+                            failure.response.text[:200],
+                        )
                         raise  # the request itself is wrong; another key cannot help
                     retry_after = _retry_after(failure.response.headers)
                     self.pool.failed(state, status, retry_after)

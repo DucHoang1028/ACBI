@@ -96,3 +96,33 @@ def test_all_keys_failing_raises_and_bad_request_does_not_rotate(
     with pytest.raises(httpx.HTTPStatusError):
         ask(groq)
     assert seen == ["k1"]
+
+
+def test_schema_failure_from_the_model_is_regenerated_not_fatal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        if len(calls) == 1:  # Groq answers 400 when the model breaks the schema
+            return httpx.Response(400, json={"error": {"code": "json_validate_failed"}})
+        content = json.dumps({"text": "second try"})
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": content}}], "usage": {}},
+        )
+
+    monkeypatch.setattr(
+        client_module.httpx,
+        "Client",
+        lambda *a, **k: REAL_CLIENT(transport=httpx.MockTransport(handler), timeout=5),
+    )
+    settings = Settings(
+        _env_file=None,
+        groq_api_key="k1",
+        warehouse_password="x",
+        app_db_password="x",
+    )
+    assert ask(GroqClient(settings)) == "second try"
+    assert len(calls) == 2
