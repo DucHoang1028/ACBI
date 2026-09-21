@@ -76,8 +76,8 @@ def references(role: str, data_as_of: str) -> list[dict[str, Any]]:
             "SQL, parameters, metric versions and retrieval time and is saved. "
             "Results appear as figures, tables and charts (bar, line, pie, donut, "
             "stacked bar, scatter, KPI card). Voice questions are transcribed for "
-            "review first. Revenue and production output can be forecast from recorded months and are then "
-            "labelled as forecasts. Nothing is invented: unsupported questions are "
+            "review first. Revenue and production output can be forecast from "
+            "recorded months and are then labelled as forecasts. Nothing is invented: unsupported questions are "
             "declined.",
         }
     )
