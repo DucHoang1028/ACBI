@@ -273,6 +273,11 @@ def test_is_it_the_highest_compares_with_every_territory() -> None:
         raw, None, "Có phải Canada là khu vực có doanh thu cao nhất năm 2024 không?"
     )
     assert resolved.dimension == "sales_territory" and resolved.territory is None
+    top1 = raw.model_copy(update={"dimension": "sales_territory", "limit": 1})
+    again = merged_intent(
+        top1, None, "Có phải Canada là khu vực có doanh thu cao nhất năm 2024 không?"
+    )
+    assert again.territory is None and again.limit == 100  # not "top 1 for Canada"
     plain = merged_intent(raw, None, "Doanh thu Canada năm 2024")
     assert plain.dimension == "none" and plain.territory == "Canada"
 
@@ -311,3 +316,71 @@ def test_two_years_with_nothing_joining_them_are_asked_about() -> None:
         "revenue 2024 vs 2023",
     ):
         assert conflicting_years(fine) == [], fine
+
+
+def test_a_correction_in_the_message_wins() -> None:
+    from app.conversation.intent import resolve_corrections
+
+    assert resolve_corrections("doanh thu tháng 3, ý mình là tháng 4 năm 2025") == (
+        "doanh thu tháng 4 năm 2025"
+    )
+    assert (
+        resolve_corrections(
+            "chào bạn, mình muốn xem doanh thu, "
+            "à mà thôi xem sản lượng đi, năm 2024 nhé"
+        )
+        == "xem sản lượng đi, năm 2024 nhé"
+    )
+    plain = "doanh thu năm 2024 của Canada"
+    assert resolve_corrections(plain) == plain
+    assert resolve_corrections("doanh thu năm 2024, nhầm") == "doanh thu năm 2024, nhầm"
+
+
+def test_percent_of_total_and_unit_requests_are_recognised() -> None:
+    import re
+
+    from app.core.dates import FORMAT_REQUEST, is_share_question
+    from app.core.text import fold
+
+    assert is_share_question("% Canada trong tổng doanh thu năm 2024")
+    assert is_share_question("Canada chiếm bao nhiêu phần trăm")
+    assert not is_share_question("Doanh thu Canada năm 2024")
+    for asks in (
+        "doanh thu năm 2024 tính bằng triệu",
+        "làm tròn giúp mình",
+        "revenue in millions",
+    ):
+        assert re.search(FORMAT_REQUEST, fold(asks)), asks
+    assert not re.search(FORMAT_REQUEST, fold("doanh thu dạng bảng"))
+
+
+def test_unsupported_topics_are_refused_without_a_model() -> None:
+    from app.conversation.intent import local_unsupported
+
+    for asked in (
+        "Lợi nhuận năm 2024 là bao nhiêu?",
+        "Top 5 nhân viên bán hàng năm 2024",
+        "Quy đổi doanh thu năm 2024 sang VND",
+        "Doanh thu theo khách hàng năm 2024",
+        "Tồn kho hiện tại của xe đạp Mountain",
+        "What is our profit margin?",
+    ):
+        found = local_unsupported(asked)
+        assert found is not None and found.intent_type == "unsupported", asked
+    for fine in (
+        "Sản lượng năm 2024",  # "lượng" must not read as "lương" (salary)
+        "Doanh thu và lợi nhuận năm 2024",  # a known metric is still answered
+        "Doanh thu Canada năm 2024",
+        "Tỷ lệ phế phẩm theo lý do",
+    ):
+        assert local_unsupported(fine) is None, fine
+
+
+def test_how_many_percent_higher_reads_as_a_gap_not_a_share() -> None:
+    from app.presentation.analysis import analysis_kind
+
+    assert (
+        analysis_kind("Khu vực đầu bảng cao hơn khu vực cuối bảng bao nhiêu phần trăm?")
+        == "difference"
+    )
+    assert analysis_kind("Canada chiếm bao nhiêu phần trăm?") == "share"

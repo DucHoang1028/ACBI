@@ -33,8 +33,10 @@ from app.conversation.intent import (
     first_task_text,
     local_comparison_intent,
     local_intent,
+    local_unsupported,
     merged_intent,
     next_deferred,
+    resolve_corrections,
     resume_pending,
     split_tasks,
     unstick,
@@ -47,6 +49,7 @@ from app.conversation.service import (
     save_context,
 )
 from app.core.dates import (
+    FORMAT_REQUEST,
     GROWTH,
     WHY,
     Period,
@@ -327,6 +330,13 @@ def run_dialogue(
     """Answer about the data itself, or decline what the system cannot serve."""
     limitation = raw.intent_type == "unsupported"
     mode = "limitation" if limitation else "answer"
+    if limitation and canned is None and re.search(WHY, fold(body.question)):
+        # "Why did it fall?" always gets the same plain answer, whatever the model says.
+        canned = (
+            "Tôi chỉ đưa ra số liệu, chưa giải thích được nguyên nhân. "
+            if body.language == "vi"
+            else "I can give the figures but not explain the reasons. "
+        ) + fallback("answer", body.language, user["role"])
     previous = last_answer(
         latest_in_conversation(state.storage, user["id"], conversation_id, user["role"])
     )
@@ -434,7 +444,20 @@ def run_forecast(
     rows = run_query(state.warehouse, plan, budget)
     months = [str(r["month"]) for r in rows]
     series = [float(r[metric]) for r in rows]
-    wanted = raw.horizon_months or horizon_to(body.question, end) or 6
+    named = horizon_to(body.question, end)
+    if named is not None and named > 12:
+        # A period far ahead is not answered with a forecast of nearer months.
+        last = next_months(end, 12)[-1]
+        return ask_again(
+            f"Tôi chỉ dự báo tối đa 12 tháng tới (đến {last:%m/%Y}), nên chưa dự báo "
+            "được kỳ bạn nêu. Hãy hỏi một kỳ trong khoảng đó, ví dụ “dự báo doanh "
+            "thu 6 tháng tới”."
+            if vi
+            else f"I forecast at most 12 months ahead (to {last:%Y-%m}), so I cannot "
+            "forecast the period you name. Ask for one inside that range, for "
+            "example “forecast revenue for the next 6 months”."
+        )
+    wanted = raw.horizon_months or named or 6
     horizon, capped = min(wanted, 12), wanted > 12
     try:
         if not contiguous(months):
@@ -983,6 +1006,8 @@ def answer_one(
         if later:
             asked = later
         # A message with several requests: the model reads the first one only.
+        if not later:
+            asked = resolve_corrections(asked)
         tasks = [asked] if later else split_tasks(asked)
         first = tasks[0]
         canned = (
@@ -993,7 +1018,8 @@ def answer_one(
         raw = (
             chat_intent()
             if canned
-            else local_comparison_intent(first)
+            else local_unsupported(first)
+            or local_comparison_intent(first)
             or (local_intent(first) if settings.local_intent_enabled else None)
         )
         if raw is None:
@@ -1245,6 +1271,14 @@ def answer_one(
                 if body.language == "vi"
                 else "Quarterly breakdown is not available, so this is by month."
             )
+        if re.search(FORMAT_REQUEST, fold(body.question)):
+            unit = (
+                "Tôi chưa làm tròn hoặc đổi đơn vị (triệu, tỷ, ...); số liệu hiển thị "
+                "đúng như trong dữ liệu."
+                if body.language == "vi"
+                else "I do not round or change units yet; figures are shown as stored."
+            )
+            growth_note = f"{growth_note} {unit}" if growth_note else unit
         if re.search(WHY, fold(body.question)):
             reason = (
                 "Tôi chỉ đưa ra số liệu, chưa giải thích được nguyên nhân."

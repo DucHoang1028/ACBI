@@ -175,15 +175,25 @@ def _verify_extreme(
     """"Is Canada the highest?" is answered against every territory, not for Canada."""
     value = fold(question)
     vocab = vocabulary.get()
-    if current["dimension"] != "none" or not EXTREME.search(value):
+    if not EXTREME.search(value):
         return
     if set(vocab.match_dimensions(value)) - {"sales_territory", "factory"}:
         return  # another breakdown was named: the extreme is within it
     members = vocab.match_members(value)
-    if len(members.get("sales_territory", [])) == 1 and not members.get("factory"):
+    territory_dim = current["dimension"] in {"none", "sales_territory"}
+    factory_dim = current["dimension"] in {"none", "factory"}
+    if (
+        territory_dim
+        and len(members.get("sales_territory", [])) == 1
+        and not members.get("factory")
+    ):
         current.update(dimension="sales_territory", territory=None, limit=100)
         hints.pop("territory", None)
-    elif len(members.get("factory", [])) == 1 and not members.get("sales_territory"):
+    elif (
+        factory_dim
+        and len(members.get("factory", [])) == 1
+        and not members.get("sales_territory")
+    ):
         current.update(dimension="factory", factory_id=None, limit=100)
 
 
@@ -620,6 +630,51 @@ TITLE_WORDS = {
 }  # fmt: skip
 
 
+UNSUPPORTED_ALWAYS = re.compile(
+    r"\b(?:quy doi|chuyen doi tien|ty gia|exchange rate|convert\w*|vnd|usd|eur)\b|"
+    r"\b(?:theo|by|per|moi|tung|each)\s+(?:khach hang|customers?|nhan vien|"
+    r"employees?|nha cung cap|suppliers?)\b"
+)
+UNSUPPORTED_TOPICS = re.compile(
+    r"\b(?:loi nhuan|profit|margin|khach hang|customers?|nhan vien|employees?|staff|"
+    r"tien luong|bang luong|muc luong|salary|payroll|ton kho|inventory|stock|chi phi|"
+    r"costs?|gia von|nha cung cap|suppliers?)\b"
+)
+
+
+def local_unsupported(question: str) -> Intent | None:
+    """Things the warehouse metrics never cover, refused without asking a model.
+
+    A currency conversion or a split by customer or employee is refused even beside a
+    known metric (answering the plain figure would hide what was asked); a topic such
+    as profit, stock or salary is refused when no known metric is named with it."""
+    value = fold(question)
+    if not (
+        UNSUPPORTED_ALWAYS.search(value)
+        or (
+            UNSUPPORTED_TOPICS.search(value)
+            and not vocabulary.get().match_metrics(value)
+        )
+    ):
+        return None
+    return Intent.model_validate(
+        {
+            "metric_id": None,
+            "dimension": "none",
+            "period": None,
+            "start_date": None,
+            "end_date": None,
+            "factory_id": None,
+            "territory": None,
+            "limit": 100,
+            "needs_clarification": False,
+            "clarification_question": None,
+            "zero_scrap_only": False,
+            "intent_type": "unsupported",
+        }
+    )
+
+
 def unfamiliar_name(question: str) -> bool:
     """A capitalised word (not the first) that names no metric, breakdown or member.
 
@@ -815,6 +870,39 @@ OWN_PERIOD = (
     r"\b(?:nam\s+\d{4}|20\d{2}|thang\s+\d{1,2}|quy\s+\d|(?:this|last)\s+\w+)\b|"
     + RELATIVE_PERIOD
 )
+
+
+CORRECTION = re.compile(
+    r"\b(?:a ma thoi|ma thoi|y minh la|y toi la|y em la|nham|doi lai|no wait|"
+    r"i mean|actually|scratch that)\b"
+)
+PERIOD_WORDS = re.compile(
+    r"\b(?:(?:thang|quy|nam)\s*\d{1,4}(?:\s*(?:nam\s*|/)\s*\d{4})?|20\d{2}"
+    r"|(?:thang|quy|nam|tuan)\s+(?:nay|truoc)|hom (?:nay|qua))\b"
+)
+
+
+def resolve_corrections(question: str) -> str:
+    """The part after a correction wins ("tháng 3, ý mình là tháng 4 năm 2025").
+
+    A correction that names a metric replaces the whole earlier part; one that names
+    only a period keeps the earlier metric and drops the earlier period."""
+    value = fold(question)
+    matches = list(CORRECTION.finditer(value))
+    if not matches or len(value) != len(question):
+        return question
+    last = matches[-1]
+    before = question[: last.start()].strip(" ,;.-–")
+    after = question[last.end() :].strip(" ,;.-–")
+    if not after:
+        return question
+    if vocabulary.get().match_metrics(fold(after)):
+        return after
+    spans = [m.span() for m in PERIOD_WORDS.finditer(fold(before))]
+    kept = "".join(
+        ch for i, ch in enumerate(before) if not any(a <= i < b for a, b in spans)
+    )
+    return f"{' '.join(kept.split())} {after}".strip()
 
 
 def first_task_text(question: str, later: list[str]) -> str:

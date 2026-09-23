@@ -17,7 +17,11 @@ HIDDEN = {"sample_count", "ordered_units", "scrapped_units"}
 
 WHICH = r"\b(?:cai nao|ben nao|nuoc nao|khu vuc nao|thang nao|nam nao|nhom nao|which)\b"
 KINDS = {
-    "difference": r"\b(?:chenh lech|khac nhau|hon nhau|difference|gap)\b|hon bao nhieu",
+    "difference": (
+        r"\b(?:chenh lech|khac nhau|hon nhau|difference|gap)\b|hon bao nhieu|"
+        r"\b(?:cao|nhieu|lon|thap|it) hon\b.*\b(?:phan tram|percent)\b|"
+        r"\b(?:higher|lower|more|less)\b.*\bpercent\b"
+    ),
     "share": r"\b(?:chiem bao nhieu|phan tram|ty trong|share|percent)\b",
     "total": r"\b(?:tong|cong lai|total|sum)\b",
     "average": r"\b(?:trung binh|average|mean)\b",

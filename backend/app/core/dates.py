@@ -70,7 +70,12 @@ def date_hints(question: str) -> dict[str, str | None]:
     return {}
 
 
-SHARE = r"phan tram|chiem bao nhieu|ty trong|share|percent"
+SHARE = r"phan tram|chiem bao nhieu|ty trong|share|percent|trong tong|ty le tren tong"
+FORMAT_REQUEST = (
+    r"\b(?:(?:tinh bang|bang|don vi|in)\s+(?:trieu|nghin|ty|million|billion|thousand)s?"
+    r"|lam tron|round(?:ed|ing)?)\b"
+)
+
 STACK = r"\b(?:xep chong|cot chong|stacked)\b"
 WHY = r"\b(?:tai sao|vi sao|nguyen nhan|why)\b"
 GROWTH = (
@@ -106,7 +111,7 @@ def single_dimension(value: str) -> str | None:
 
 
 def is_share_question(question: str) -> bool:
-    return bool(re.search(rf"\b(?:{SHARE})\b", fold(question)))
+    return "%" in question or bool(re.search(rf"\b(?:{SHARE})\b", fold(question)))
 
 
 def intent_hints(question: str) -> dict[str, object]:
