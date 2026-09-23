@@ -260,7 +260,9 @@ def impossible_date(question: str) -> str | None:
     value = fold(question)
     if match := re.search(r"\b(?:thang|month)\s*(\d{1,2})\b", value):
         if not 1 <= int(match.group(1)) <= 12:
-            return match.group(0)
+            # folding keeps the length, so the same span is the user's own wording
+            same = len(value) == len(question)
+            return question[match.start() : match.end()] if same else match.group(0)
     for day, month, year in re.findall(
         r"(?<![\d/-])(\d{1,2})\s*/\s*(\d{1,2})(?:\s*/\s*(20\d{2}))?(?![\d/-])",
         value,

@@ -3,10 +3,11 @@
 Each period is an ordinary validated query; this module only finds the periods and
 lays the results next to each other. Every figure in the text comes from the rows."""
 
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from app.core.dates import Period
+from app.core.dates import Period, month_start
 from app.metadata import vocabulary
 from app.presentation.analysis import amount, percent
 
@@ -35,6 +36,34 @@ def label(period: Period, language: str) -> str:
 def adjacent(periods: list[Period]) -> bool:
     """True when each period starts the day after the previous one ends."""
     return all(a[2] == b[1] for a, b in zip(periods, periods[1:]))
+
+
+def with_earlier_period(named: list[Period], slots: dict[str, Any]) -> list[Period]:
+    """ "So sánh với 2023" after a 2024 answer: the period shown and the one named.
+
+    Empty unless exactly one period is named and the earlier answer's period is
+    explicit and of the same kind (a year against a year, a quarter against a quarter).
+    """
+    if len(named) != 1 or slots.get("period") != "explicit":
+        return []
+    try:
+        start = date.fromisoformat(str(slots["start_date"]))
+        end = date.fromisoformat(str(slots["end_date"]))
+    except (KeyError, ValueError):
+        return []
+    if end == date(start.year + 1, 1, 1) and (start.month, start.day) == (1, 1):
+        kind = "year"
+    elif (
+        start.day == 1 and start.month in (1, 4, 7, 10) and end == month_start(start, 3)
+    ):
+        kind = "quarter"
+    elif start.day == 1 and end == month_start(start, 1):
+        kind = "month"
+    else:
+        return []
+    if kind != named[0][0] or named[0][1] == start:
+        return []
+    return sorted([named[0], (kind, start, end)], key=lambda p: p[1])
 
 
 def number(value: Any) -> Decimal | None:

@@ -50,6 +50,7 @@ from app.conversation.service import (
     save_context,
 )
 from app.core.dates import (
+    COMPARE_WORDS,
     FORMAT_REQUEST,
     GROWTH,
     WHY,
@@ -91,6 +92,7 @@ from app.query.comparison import (
     adjacent,
     label,
     side_by_side,
+    with_earlier_period,
 )
 from app.query.forecast import (
     METHOD_VERSION,
@@ -1014,8 +1016,13 @@ def answer_one(
         first = tasks[0]
         canned = (
             None
-            if later or (prior or {}).get("pending_question")
-            else small_talk(first, body.language, user["role"])
+            if later
+            else small_talk(
+                first,
+                body.language,
+                user["role"],
+                bool((prior or {}).get("pending_question")),
+            )
         )
         raw = (
             chat_intent()
@@ -1191,6 +1198,11 @@ def answer_one(
             return 200, response(outcome, question, request_id, conversation_id)
         growth_note = None
         periods = named_periods(body.question) if comparing else []
+        if not periods and re.search(COMPARE_WORDS, fold(body.question)):
+            # "So sánh với 2023" after a 2024 answer: the period on screen and 2023.
+            periods = with_earlier_period(
+                named_periods(body.question), (prior or {}).get("slots") or {}
+            )
         if len(periods) >= 2:
             if intent.dimension in {"month", "day", "week"} and (
                 single_dimension(fold(body.question)) != intent.dimension

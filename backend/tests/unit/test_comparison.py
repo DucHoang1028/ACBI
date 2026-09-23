@@ -450,3 +450,35 @@ def test_everyday_words_for_last_period_are_understood() -> None:
         ("doanh số tuần ngoái", "last_week"),
     ):
         assert date_hints(text).get("period") == period, text
+
+
+def test_compare_with_a_named_year_uses_the_year_on_screen() -> None:
+    from app.query.comparison import with_earlier_period
+
+    slots = {"period": "explicit", "start_date": "2024-01-01", "end_date": "2025-01-01"}
+    pair = with_earlier_period(named_periods("so sánh với 2023"), slots)
+    assert [(k, s.year) for k, s, _ in pair] == [("year", 2023), ("year", 2024)]
+    assert (
+        with_earlier_period(named_periods("so sánh với tháng 3 năm 2023"), slots) == []
+    )
+    assert with_earlier_period(named_periods("so sánh với 2024"), slots) == []
+    assert with_earlier_period(named_periods("so sánh với 2023"), {}) == []
+
+
+def test_one_trailing_period_serves_every_request_before_it() -> None:
+    from app.conversation.intent import split_tasks
+
+    tasks = split_tasks("doanh thu Canada và sản lượng Factory A quý trước")
+    assert tasks == ["doanh thu Canada quý trước", "sản lượng Factory A quý trước"]
+    kept = split_tasks("doanh thu năm 2023 và sản lượng quý trước")
+    assert kept == ["doanh thu năm 2023", "sản lượng quý trước"]
+
+
+def test_a_bare_why_is_refused_and_thanks_work_mid_question() -> None:
+    from app.conversation.dialogue import small_talk
+    from app.conversation.intent import local_unsupported
+
+    assert local_unsupported("tại sao lại như vậy?") is not None
+    assert local_unsupported("tại sao doanh thu quý trước giảm") is None  # has a metric
+    assert small_talk("cảm ơn", "vi", "manager", pending=True)
+    assert small_talk("ok", "vi", "manager", pending=True) is None

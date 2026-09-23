@@ -205,7 +205,9 @@ def chat_intent() -> Intent:
     )
 
 
-def small_talk(question: str, language: str, role: str) -> str | None:
+def small_talk(
+    question: str, language: str, role: str, pending: bool = False
+) -> str | None:
     """A fixed reply to thanks, greetings and "ok": no model call, nothing invented."""
     value = fold(question).strip(" .!?~,")
     kind = next(
@@ -214,6 +216,8 @@ def small_talk(question: str, language: str, role: str) -> str | None:
     )
     if kind is None:
         return None
+    if pending and kind == "ack":
+        return None  # "ok" may be the answer to the question just asked
     vi = language == "vi"
     if kind == "thanks":
         return (

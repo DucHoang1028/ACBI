@@ -17,6 +17,7 @@ from app.core.dates import (
     GROWTH,
     MONTH_NAMES,
     STACK,
+    WHY,
     compares_two_periods,
     intent_hints,
     is_confirmation,
@@ -283,6 +284,7 @@ def merged_intent(
         or intent.metric_id
         or intent.period
         or intent.dimension != "none"
+        or intent.limit != 100  # "top 3"
         or current["dimension"] != "none"  # "theo khu vực" read from the wording
         or intent.territory
         or intent.factory_id is not None
@@ -363,10 +365,12 @@ def merged_intent(
     ):
         current["dimension"] = slots["dimension"]
     _close_end(current)
-    if current["period"] == "explicit" and not hints and intent.period is None:
-        for field in ("start_date", "end_date"):
-            if current[field] is None:
-                current[field] = slots.get(field)
+    if current["period"] == "explicit" and not hints:
+        if intent.period is None or not (current["start_date"] or current["end_date"]):
+            # No dates of its own (a half-given new date is asked about instead).
+            for field in ("start_date", "end_date"):
+                if current[field] is None:
+                    current[field] = slots.get(field)
     missing = [
         field
         for field in current["missing_fields"]
@@ -652,7 +656,8 @@ def local_unsupported(question: str) -> Intent | None:
     as profit, stock or salary is refused when no known metric is named with it."""
     value = fold(question)
     if not (
-        UNSUPPORTED_ALWAYS.search(value)
+        (re.search(WHY, value) and not vocabulary.get().match_metrics(value))
+        or UNSUPPORTED_ALWAYS.search(value)
         or (
             UNSUPPORTED_TOPICS.search(value)
             and not vocabulary.get().match_metrics(value)
@@ -886,7 +891,24 @@ def split_tasks(question: str) -> list[str]:
             bare_period = not re.sub(PERIOD_TOKEN, "", part).strip()
             joiner = " và " if bare_period or continues else ", "
             tasks[-1] += f"{joiner}{original}"
-    return tasks[:9] if len(tasks) > 1 else [question]
+    if len(tasks) < 2:
+        return [question]
+    found = list(re.finditer(OWN_PERIOD, fold(tasks[-1])))
+    if found:
+        # "Doanh thu Canada và sản lượng Factory A quý trước": one period for both.
+        phrase = tasks[-1][found[-1].start() : found[-1].end()]
+        vocab = vocabulary.get()
+
+        def shares(t: str) -> bool:
+            value = fold(t)
+            return (
+                bool(vocab.match_metrics(value))
+                and not re.search(OWN_PERIOD, value)
+                and not re.search(TASK_WORDS, value)  # a forecast keeps its own horizon
+            )
+
+        tasks = [f"{t} {phrase}" if shares(t) else t for t in tasks[:-1]] + tasks[-1:]
+    return tasks[:9]
 
 
 def further_requests(question: str) -> list[str]:
