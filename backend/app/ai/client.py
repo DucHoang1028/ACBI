@@ -667,7 +667,7 @@ class GroqClient:
                 reservation = self.pool.reserve(state, estimated)
                 try:
                     with httpx.Client(
-                        timeout=min(25, budget.remaining() / 2)
+                        timeout=min(12, budget.remaining() / 2)
                         if state.json_object
                         else min(10, budget.remaining() / 4)
                     ) as client:

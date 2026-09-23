@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     llm_provider_order: str = "gemini,groq,literouter"
     gemini_api_keys: SecretStr = SecretStr("")
     # Comma-separated, tried in order. A key a model is closed to rests for an hour.
-    gemini_model: str = "gemini-3.6-flash,gemini-2.5-flash"
+    gemini_model: str = "gemini-2.5-flash,gemini-3.6-flash"
     literouter_api_key: SecretStr = SecretStr("")
     literouter_model: str = "deepseek-v3.2:free"
     # Demo only: one-click sign-in without a password (see /api/auth/demo-login).
