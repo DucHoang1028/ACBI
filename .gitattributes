@@ -1,0 +1,3 @@
+hf/*.sh text eol=lf
+hf/Dockerfile text eol=lf
+hf/nginx.conf text eol=lf
