@@ -38,7 +38,8 @@ FOLLOW_UP = (
 
 
 RELATIVE_PERIOD = (
-    r"\b(?:(?:thang|quy|nam|tuan)\s+(?:nay|truoc)|hom nay|hom qua|"
+    r"\b(?:(?:thang|quy|nam|tuan)\s+(?:nay|truoc|ngoai|vua roi|vua qua)|"
+    r"hom nay|hom qua|"
     r"(?:this|last)\s+(?:month|quarter|year|week))\b"
 )
 

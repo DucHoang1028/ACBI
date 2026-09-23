@@ -18,13 +18,13 @@ def date_hints(question: str) -> dict[str, str | None]:
         "today": r"\b(?:hom nay|today)\b",
         "yesterday": r"\b(?:hom qua|yesterday)\b",
         "this_week": r"\b(?:tuan nay|this week)\b",
-        "last_week": r"\b(?:tuan truoc|last week)\b",
+        "last_week": r"\b(?:tuan (?:truoc|ngoai|vua roi|vua qua)|last week)\b",
         "this_month": r"\b(?:thang nay|this month)\b",
-        "last_month": r"\b(?:thang truoc|last month)\b",
+        "last_month": r"\b(?:thang (?:truoc|ngoai|vua roi|vua qua)|last month)\b",
         "this_quarter": r"\b(?:quy nay|this quarter)\b",
-        "last_quarter": r"\b(?:quy truoc|last quarter)\b",
+        "last_quarter": r"\b(?:quy (?:truoc|ngoai|vua roi|vua qua)|last quarter)\b",
         "this_year": r"\b(?:nam nay|this year)\b",
-        "last_year": r"\b(?:nam truoc|last year)\b",
+        "last_year": r"\b(?:nam (?:truoc|ngoai|vua roi|vua qua)|last year)\b",
     }
     found = [key for key, pattern in aliases.items() if re.search(pattern, value)]
     if len(found) == 1 and not re.search(r"\b\d{4}\b", value):

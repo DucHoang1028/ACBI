@@ -438,3 +438,15 @@ def test_a_short_follow_up_can_be_read_without_a_model() -> None:
     by_area = merged_intent(follow_up_intent("theo khu vực"), prior, "theo khu vực")
     assert by_area.dimension == "sales_territory" and by_area.metric_id == "revenue"
     assert follow_up_intent("so với năm ngoái thì sao") is None
+
+
+def test_everyday_words_for_last_period_are_understood() -> None:
+    from app.core.dates import date_hints
+
+    for text, period in (
+        ("doanh thu năm ngoái bao nhiêu", "last_year"),
+        ("doanh thu tháng vừa rồi", "last_month"),
+        ("doanh thu quý vừa qua", "last_quarter"),
+        ("doanh số tuần ngoái", "last_week"),
+    ):
+        assert date_hints(text).get("period") == period, text
