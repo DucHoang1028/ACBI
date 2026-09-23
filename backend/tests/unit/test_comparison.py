@@ -384,3 +384,26 @@ def test_how_many_percent_higher_reads_as_a_gap_not_a_share() -> None:
         == "difference"
     )
     assert analysis_kind("Canada chiếm bao nhiêu phần trăm?") == "share"
+
+
+def test_dates_the_calendar_does_not_have_are_caught() -> None:
+    from app.core.dates import impossible_date
+
+    for bad in (
+        "Tỷ lệ đúng hạn tháng 13 năm 2024",
+        "Doanh thu ngày 31/02/2024",
+        "Doanh thu 30/2",
+        "Doanh thu 2024-02-31",
+        "revenue in month 14",
+    ):
+        assert impossible_date(bad), bad
+    for fine in (
+        "Doanh thu tháng 12 năm 2024",
+        "Doanh thu ngày 29/02/2024",
+        "Doanh thu 6 tháng tới",
+        "Doanh thu tháng 3/2025",
+        "Doanh thu từ 01/03/2024 đến 31/03/2024",
+        "Doanh thu 2024-03-31",
+        "so sánh tháng 12/2024 và tháng 1/2025",
+    ):
+        assert impossible_date(fine) is None, fine

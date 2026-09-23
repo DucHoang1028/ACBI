@@ -56,6 +56,7 @@ from app.core.dates import (
     compares_two_periods,
     conflicting_years,
     date_hints,
+    impossible_date,
     is_share_question,
     mentions_time,
     metric_words,
@@ -1149,6 +1150,24 @@ def answer_one(
                 prior,
             )
             return 200, result
+        if bad := impossible_date(body.question):
+            outcome = "needs_clarification"
+            question = (
+                f"“{bad}” không có trong lịch. Bạn muốn ngày hoặc tháng nào? Ví dụ: "
+                "tháng 3 năm 2025 hoặc 28/02/2024."
+                if body.language == "vi"
+                else f"“{bad}” is not a date in the calendar. Which day or month do "
+                "you mean? For example: March 2025 or 2024-02-28."
+            )
+            save_context(
+                storage,
+                conversation_id,
+                user["id"],
+                carry_slots(prior, intent),
+                question,
+                next_turns(prior, body.question, question),
+            )
+            return 200, response(outcome, question, request_id, conversation_id)
         if not comparing and (clash := conflicting_years(body.question)):
             outcome = "needs_clarification"
             question = (

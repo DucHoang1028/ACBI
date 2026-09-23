@@ -252,6 +252,32 @@ def named_periods(question: str) -> list[Period]:
     return sorted(((k, s, e) for (k, s), e in found.items()), key=lambda p: p[1])
 
 
+def impossible_date(question: str) -> str | None:
+    """A month or day that the calendar does not have ("tháng 13", "31/02/2024").
+
+    Returned as the wording to quote back; the question must be asked about, since a
+    model may quietly turn it into a real date."""
+    value = fold(question)
+    if match := re.search(r"\b(?:thang|month)\s*(\d{1,2})\b", value):
+        if not 1 <= int(match.group(1)) <= 12:
+            return match.group(0)
+    for day, month, year in re.findall(
+        r"(?<![\d/-])(\d{1,2})\s*/\s*(\d{1,2})(?:\s*/\s*(20\d{2}))?(?![\d/-])",
+        value,
+    ):
+        y = int(year) if year else 2024
+        try:
+            date(y, int(month), int(day))
+        except ValueError:
+            return f"{day}/{month}" + (f"/{year}" if year else "")
+    for year, month, day in re.findall(r"\b(20\d{2})-(\d{2})-(\d{2})\b", value):
+        try:
+            date(int(year), int(month), int(day))
+        except ValueError:
+            return f"{year}-{month}-{day}"
+    return None
+
+
 def conflicting_years(question: str) -> list[str]:
     """Two different years named with nothing joining them ("doanh thu 2025 năm 2024").
 
