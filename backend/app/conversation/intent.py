@@ -16,6 +16,7 @@ from app.core.dates import (
     COMPARE_WORDS,
     GROWTH,
     MONTH_NAMES,
+    STACK,
     compares_two_periods,
     intent_hints,
     is_confirmation,
@@ -162,6 +163,42 @@ def _which_dimension(current: dict[str, Any], intent: Intent, question: str) -> 
         current["dimension"] = dimension
 
 
+EXTREME = re.compile(
+    r"\b(?:cao nhat|thap nhat|nhieu nhat|it nhat|lon nhat|nho nhat|"
+    r"highest|lowest|best|worst|most|least)\b"
+)
+
+
+def _verify_extreme(
+    current: dict[str, Any], hints: dict[str, Any], question: str
+) -> None:
+    """"Is Canada the highest?" is answered against every territory, not for Canada."""
+    value = fold(question)
+    vocab = vocabulary.get()
+    if current["dimension"] != "none" or not EXTREME.search(value):
+        return
+    if set(vocab.match_dimensions(value)) - {"sales_territory", "factory"}:
+        return  # another breakdown was named: the extreme is within it
+    members = vocab.match_members(value)
+    if len(members.get("sales_territory", [])) == 1 and not members.get("factory"):
+        current.update(dimension="sales_territory", territory=None, limit=100)
+        hints.pop("territory", None)
+    elif len(members.get("factory", [])) == 1 and not members.get("sales_territory"):
+        current.update(dimension="factory", factory_id=None, limit=100)
+
+
+def _stacked_by_month(current: dict[str, Any], question: str) -> None:
+    """"By month ... stacked" for two territories: months, stacked by territory."""
+    value = fold(question)
+    vocab = vocabulary.get()
+    if (
+        re.search(STACK, value)
+        and "month" in vocab.match_dimensions(value)
+        and len(vocab.match_members(value).get("sales_territory", [])) >= 2
+    ):
+        current.update(dimension="month", series_dimension="sales_territory", limit=250)
+
+
 def _those_members(
     current: dict[str, Any], slots: dict[str, Any], intent: Intent, question: str
 ) -> None:
@@ -215,6 +252,8 @@ def merged_intent(
         )
     _by_dimension(current, question)
     _which_dimension(current, intent, question)
+    _verify_extreme(current, hints, question)
+    _stacked_by_month(current, question)
     _those_members(current, slots, intent, question)
     if EVALUATIVE.search(fold(question)) and not vocabulary.get().match_metrics(
         fold(question)

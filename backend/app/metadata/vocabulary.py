@@ -235,7 +235,9 @@ class Vocabulary:
                 for term in self.member_terms(dimension.id, name)
             }
             for match in re.finditer(
-                alternation(dimension.synonyms) + r"\s+([a-z]|\d{1,2})\b", folded
+                alternation(dimension.synonyms)
+                + r"\s+(?:so\s+|number\s+|no\.?\s+|#\s*)?([a-z]|\d{1,2})\b",
+                folded,
             ):
                 if match.group(1) not in tails:
                     return dimension.id

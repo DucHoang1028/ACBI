@@ -92,7 +92,7 @@ businessMetrics:
   name: Revenue
   displayName: {vi: Doanh thu, en: Revenue}
   synonyms:
-    vi: [doanh thu, doanh số]
+    vi: [doanh thu, doanh số, bán được, bán đc, tiền bán hàng, số tiền bán]
     en: [revenue, sales]
   domain: sales
   description: "Sum of order subtotals (tax and freight excluded), dated by order date. Use for revenue or sales amounts (doanh thu, doanh số)."

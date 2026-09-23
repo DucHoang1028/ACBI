@@ -247,6 +247,19 @@ def named_periods(question: str) -> list[Period]:
     return sorted(((k, s, e) for (k, s), e in found.items()), key=lambda p: p[1])
 
 
+def conflicting_years(question: str) -> list[str]:
+    """Two different years named with nothing joining them ("doanh thu 2025 năm 2024").
+
+    A person may mean either; with "và", "đến", "so với" or a comma the message says
+    what it does with them, so only the bare clash is reported."""
+    value = fold(question)
+    years = sorted(set(re.findall(r"(?<!\d)(20\d{2})(?!\d)", value)))
+    joined = re.search(
+        r"\b(?:va|and|den|toi|to|vs|so|voi|tu|from|giua|between|ca)\b|[,;/-]", value
+    )
+    return years if len(years) >= 2 and not joined else []
+
+
 def compares_two_periods(question: str) -> bool:
     """Two or more named years, quarters or months set against each other.
 

@@ -17,7 +17,13 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.ai.budget import BudgetExceeded, RequestBudget
 from app.ai.client import FakeLLM, Intent, LLMBusy, dimension_ids
-from app.conversation.dialogue import fallback, last_answer, reply_from_metadata
+from app.conversation.dialogue import (
+    chat_intent,
+    fallback,
+    last_answer,
+    reply_from_metadata,
+    small_talk,
+)
 from app.conversation.intent import (
     WHICH,
     chosen_option,
@@ -45,6 +51,7 @@ from app.core.dates import (
     WHY,
     Period,
     compares_two_periods,
+    conflicting_years,
     date_hints,
     is_share_question,
     mentions_time,
@@ -315,6 +322,7 @@ def run_dialogue(
     request_id: str,
     conversation_id: str,
     prior: dict[str, Any] | None,
+    canned: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Answer about the data itself, or decline what the system cannot serve."""
     limitation = raw.intent_type == "unsupported"
@@ -322,7 +330,7 @@ def run_dialogue(
     previous = last_answer(
         latest_in_conversation(state.storage, user["id"], conversation_id, user["role"])
     )
-    text_out = reply_from_metadata(
+    text_out = canned or reply_from_metadata(
         state.llm,
         body.question,
         user["role"],
@@ -818,7 +826,9 @@ def answer_one(
         if body.conversation_id:
             prior = get_context(storage, conversation_id, user["id"])
             if prior is None:
-                raise HTTPException(status_code=404, detail="Conversation not found")
+                # An id with no saved state (its first answer was a refusal, or it is
+                # not this user's): start a new conversation instead of failing.
+                conversation_id = str(uuid4())
         else:
             prior = None
         if user["role"] == "it_admin":
@@ -975,16 +985,24 @@ def answer_one(
         # A message with several requests: the model reads the first one only.
         tasks = [asked] if later else split_tasks(asked)
         first = tasks[0]
-        raw = local_comparison_intent(first) or (
-            local_intent(first) if settings.local_intent_enabled else None
+        canned = (
+            None
+            if later or (prior or {}).get("pending_question")
+            else small_talk(first, body.language, user["role"])
+        )
+        raw = (
+            chat_intent()
+            if canned
+            else local_comparison_intent(first)
+            or (local_intent(first) if settings.local_intent_enabled else None)
         )
         if raw is None:
             try:
                 raw = client.interpret(
                     first if len(tasks) > 1 else asked, context, budget
                 )
-            except LLMBusy:
-                # Every AI key is resting: plain wording needs no model.
+            except (LLMBusy, httpx.HTTPError):
+                # Every AI key is resting or slow: plain wording needs no model.
                 raw = local_intent(first)
                 if raw is None:
                     raise
@@ -1032,6 +1050,7 @@ def answer_one(
                 request_id,
                 conversation_id,
                 prior,
+                canned,
             )
             return 200, result
         if raw.intent_type == "forecast" and not comparing:
@@ -1104,6 +1123,24 @@ def answer_one(
                 prior,
             )
             return 200, result
+        if not comparing and (clash := conflicting_years(body.question)):
+            outcome = "needs_clarification"
+            question = (
+                f"Bạn nhắc tới cả năm {clash[0]} và năm {clash[1]}. "
+                "Bạn muốn xem năm nào?"
+                if body.language == "vi"
+                else f"You mention both {clash[0]} and {clash[1]}. "
+                "Which year do you mean?"
+            )
+            save_context(
+                storage,
+                conversation_id,
+                user["id"],
+                carry_slots(prior, intent),
+                question,
+                next_turns(prior, body.question, question),
+            )
+            return 200, response(outcome, question, request_id, conversation_id)
         growth_note = None
         periods = named_periods(body.question) if comparing else []
         if len(periods) >= 2:
@@ -1482,8 +1519,8 @@ def answer_one(
             request_id,
             conversation_id,
         )
-    except LLMBusy:
-        logger.warning("Request %s: AI provider rate limited", request_id)
+    except (LLMBusy, httpx.TimeoutException):
+        logger.warning("Request %s: AI provider rate limited or slow", request_id)
         return 503, response(
             "technical_failure", BUSY_MESSAGE, request_id, conversation_id
         )

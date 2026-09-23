@@ -232,3 +232,82 @@ def test_a_list_of_members_and_a_meanwhile_clause_split_correctly() -> None:
     tasks = split_tasks(question)
     assert len(tasks) == 2
     assert "Canada và France" in tasks[0] and tasks[1].startswith("dự đoán sản lượng")
+
+
+def test_small_talk_gets_a_fixed_reply_without_a_model() -> None:
+    from app.conversation.dialogue import small_talk
+
+    for message in ("ok", "Ok nhé", "cảm ơn", "thanks!", "xin chào", "thế thôi à"):
+        assert small_talk(message, "vi", "manager"), message
+    for message in (
+        "doanh thu năm 2024",
+        "ok cho mình xem doanh thu",
+        "cảm ơn, còn Canada?",
+    ):
+        assert small_talk(message, "vi", "manager") is None, message
+
+
+def test_a_factory_number_that_does_not_exist_is_an_unknown_reference() -> None:
+    from app.metadata import vocabulary
+
+    vocab = vocabulary.get()
+    for text in ("san luong nha may so 7 nam 2024", "san luong nha may 7", "factory d"):
+        assert vocab.unknown_member_reference(text), text
+    for text in ("san luong factory a", "san luong nha may b nam 2024"):
+        assert not vocab.unknown_member_reference(text), text
+
+
+def test_is_it_the_highest_compares_with_every_territory() -> None:
+    from app.ai.client import Intent
+    from app.conversation.intent import merged_intent
+
+    raw = Intent.model_validate(
+        {
+            "metric_id": "revenue", "dimension": "none", "period": "explicit",
+            "start_date": "2024-01-01", "end_date": "2025-01-01", "factory_id": None,
+            "territory": "Canada", "limit": 100, "needs_clarification": False,
+            "clarification_question": None, "zero_scrap_only": False,
+        }
+    )  # fmt: skip
+    resolved = merged_intent(
+        raw, None, "Có phải Canada là khu vực có doanh thu cao nhất năm 2024 không?"
+    )
+    assert resolved.dimension == "sales_territory" and resolved.territory is None
+    plain = merged_intent(raw, None, "Doanh thu Canada năm 2024")
+    assert plain.dimension == "none" and plain.territory == "Canada"
+
+
+def test_two_territories_by_month_stacked_is_months_stacked_by_territory() -> None:
+    from app.ai.client import Intent
+    from app.conversation.intent import merged_intent
+
+    raw = Intent.model_validate(
+        {
+            "metric_id": "revenue", "dimension": "sales_territory",
+            "period": "explicit",
+            "start_date": "2024-01-01", "end_date": "2025-01-01", "factory_id": None,
+            "territory": "Canada|France", "limit": 100, "needs_clarification": False,
+            "clarification_question": None, "zero_scrap_only": False,
+        }
+    )  # fmt: skip
+    resolved = merged_intent(
+        raw, None, "Doanh thu theo tháng năm 2024 của Canada và France dạng cột chồng"
+    )
+    assert (resolved.dimension, resolved.series_dimension) == (
+        "month",
+        "sales_territory",
+    )
+
+
+def test_two_years_with_nothing_joining_them_are_asked_about() -> None:
+    from app.core.dates import conflicting_years
+
+    assert conflicting_years("doanh thu 2025 năm 2024") == ["2024", "2025"]
+    for fine in (
+        "doanh thu năm 2024",
+        "so sánh doanh thu 2023 và 2024",
+        "doanh thu từ 2022 đến 2025",
+        "doanh thu 2023, 2024",
+        "revenue 2024 vs 2023",
+    ):
+        assert conflicting_years(fine) == [], fine

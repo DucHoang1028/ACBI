@@ -9,8 +9,12 @@ import logging
 import re
 from typing import Any
 
+import httpx
+
 from app.ai.budget import RequestBudget
+from app.ai.client import Intent, LLMBusy
 from app.auth.service import allows
+from app.core.text import fold
 from app.metadata import vocabulary
 from app.query.validation import allowed_tables
 
@@ -150,6 +154,9 @@ def reply_from_metadata(
     except ValueError:  # malformed model output: use dictionary wording instead
         logger.warning("dialogue reply malformed")
         return None
+    except (LLMBusy, httpx.HTTPError):  # no model available: dictionary wording
+        logger.warning("dialogue reply skipped: model unavailable")
+        return None
     if not text or not grounded(text, refs, question):
         logger.warning("dialogue reply dropped: empty or quotes an unknown number")
         return None
@@ -166,6 +173,61 @@ def reply_from_metadata(
         text = text.replace(f"({dimension.id})", "")
         text = text.replace(dimension.id, name.lower())
     return text
+
+
+SMALL_TALK = {
+    "thanks": r"(?:cam on|camon|thanks|thank you|thx)(?: ban| nhieu| nha| nhe)*",
+    "greeting": r"(?:hi|hello|hey|alo|xin chao|chao|chao ban)(?: ban| bot)?",
+    "ack": (
+        r"(?:ok|oke|okay|okie|duoc roi|da roi|roi|vang|u|uh|vay thoi|the thoi a|"
+        r"the thoi|xong roi|tuyet|hay qua|good|great|nice)(?: a| nhe| nha| roi)*"
+    ),
+}
+
+
+def chat_intent() -> Intent:
+    """A small-talk turn: nothing to query."""
+    return Intent.model_validate(
+        {
+            "metric_id": None,
+            "dimension": "none",
+            "period": None,
+            "start_date": None,
+            "end_date": None,
+            "factory_id": None,
+            "territory": None,
+            "limit": 100,
+            "needs_clarification": False,
+            "clarification_question": None,
+            "zero_scrap_only": False,
+            "intent_type": "chat",
+        }
+    )
+
+
+def small_talk(question: str, language: str, role: str) -> str | None:
+    """A fixed reply to thanks, greetings and "ok": no model call, nothing invented."""
+    value = fold(question).strip(" .!?~,")
+    kind = next(
+        (k for k, p in SMALL_TALK.items() if re.fullmatch(p, value)),
+        None,
+    )
+    if kind is None:
+        return None
+    vi = language == "vi"
+    if kind == "thanks":
+        return (
+            "Không có gì. Bạn muốn xem thêm số liệu nào không?"
+            if vi
+            else "You are welcome. Would you like to look at anything else?"
+        )
+    if kind == "ack":
+        return (
+            "Vâng. Bạn cứ hỏi tiếp khi cần xem thêm số liệu."
+            if vi
+            else "Sure. Ask again whenever you want more figures."
+        )
+    return f"{'Chào bạn!' if vi else 'Hello!'} {fallback('answer', language, role)}"
 
 
 def fallback(mode: str, language: str, role: str) -> str:
