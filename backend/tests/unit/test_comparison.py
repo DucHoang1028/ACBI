@@ -220,3 +220,15 @@ def test_split_tasks_groups_clauses_into_requests() -> None:
     assert split_tasks(
         "so sánh doanh thu 2023 và 2024 rồi cho tôi biết khu vực nào cao nhất năm 2024"
     )[1:] == ["cho tôi biết khu vực nào cao nhất năm 2024"]
+
+
+def test_a_list_of_members_and_a_meanwhile_clause_split_correctly() -> None:
+    from app.conversation.intent import split_tasks
+
+    question = (
+        "doanh số của 2 nước là Canada và France từ năm 2022 đến nay tăng như nào "
+        "đồng thời dự đoán sản lượng tương lai"
+    )
+    tasks = split_tasks(question)
+    assert len(tasks) == 2
+    assert "Canada và France" in tasks[0] and tasks[1].startswith("dự đoán sản lượng")

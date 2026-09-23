@@ -700,8 +700,14 @@ def clarification_text(intent: Intent, language: str) -> str:
     )
 
 
-SPLIT = re.compile(r",|;|\bvà\b|\brồi\b|\bluôn\b|\bsau đó\b|\bnữa\b|\band\b|\bthen\b")
-CLAUSE = re.compile(r",|;|\bva\b|\broi\b|\bluon\b|\bsau do\b|\bnua\b|\band\b|\bthen\b")
+SPLIT = re.compile(
+    r",|;|\bvà\b|\brồi\b|\bluôn\b|\bsau đó\b|\bnữa\b|\band\b|\bthen\b"
+    r"|\bđồng thời\b|\bngoài ra\b|\bbên cạnh đó\b|\balso\b|\bplus\b"
+)
+CLAUSE = re.compile(
+    r",|;|\bva\b|\broi\b|\bluon\b|\bsau do\b|\bnua\b|\band\b|\bthen\b"
+    r"|\bdong thoi\b|\bngoai ra\b|\bben canh do\b|\balso\b|\bplus\b"
+)
 
 
 def split_tasks(question: str) -> list[str]:
@@ -728,7 +734,14 @@ def split_tasks(question: str) -> list[str]:
     for index, (part, original) in enumerate(zip(parts, originals)):
         found = set(vocab.match_metrics(part))
         own_period = bool(re.search(OWN_PERIOD, part))
-        starts = index and (
+        # "Úc và Canada ...": a clause opening with a member name goes on with the
+        # list before it.
+        continues = index and any(
+            re.match(vocab.member_pattern(dimension, name), part)
+            for dimension, names in vocab.members.items()
+            for name in names
+        )
+        starts = index and not continues and (
             re.search(TASK_WORDS, part)
             or (re.search(RANK_WORDS, part) and own_period)
             or (re.match(IMPERATIVE, part) and (found or own_period))
@@ -739,7 +752,8 @@ def split_tasks(question: str) -> list[str]:
             tasks.append(original)
         else:
             bare_period = not re.sub(PERIOD_TOKEN, "", part).strip()
-            tasks[-1] += f"{' và ' if bare_period else ', '}{original}"
+            joiner = " và " if bare_period or continues else ", "
+            tasks[-1] += f"{joiner}{original}"
     return tasks[:9] if len(tasks) > 1 else [question]
 
 
