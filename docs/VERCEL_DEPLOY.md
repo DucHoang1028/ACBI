@@ -37,5 +37,5 @@ Variables (use the Neon *pooled* host for both): `WAREHOUSE_HOST`, `WAREHOUSE_SS
 
 - Neon free: 0.5 GB storage, the database sleeps after 5 idle minutes; the first request
   after that takes a couple of extra seconds.
-- Vercel Hobby is for non-commercial use; a function may run up to 60 s here.
+- Vercel Hobby is for non-commercial use; a function may run up to 300 s here (a message with several requests can take a while).
 - Free AI quotas are shared by everyone using the link.
