@@ -482,3 +482,27 @@ def test_a_bare_why_is_refused_and_thanks_work_mid_question() -> None:
     assert local_unsupported("tại sao doanh thu quý trước giảm") is None  # has a metric
     assert small_talk("cảm ơn", "vi", "manager", pending=True)
     assert small_talk("ok", "vi", "manager", pending=True) is None
+
+
+def test_top_n_and_compare_with_follow_ups_read_without_a_model() -> None:
+    from app.conversation.intent import follow_up_intent, merged_intent
+
+    slots = {
+        "metric_id": "revenue", "dimension": "sales_territory", "period": "explicit",
+        "start_date": "2024-01-01", "end_date": "2025-01-01", "factory_id": None,
+        "territory": None, "limit": 100, "series_dimension": "none",
+    }  # fmt: skip
+    prior = {"slots": slots}
+    top = merged_intent(follow_up_intent("top 3", slots), prior, "top 3")
+    assert (top.metric_id, top.dimension, top.limit) == (
+        "revenue",
+        "sales_territory",
+        3,
+    )
+    only = merged_intent(
+        follow_up_intent("chỉ France và Germany", slots), prior, "chỉ France và Germany"
+    )
+    assert only.territory == "France|Germany"
+    assert (only.start_date, only.end_date) == ("2024-01-01", "2025-01-01")
+    assert follow_up_intent("so sánh với 2023", slots) is not None
+    assert follow_up_intent("so sánh với 2023", {}) is None

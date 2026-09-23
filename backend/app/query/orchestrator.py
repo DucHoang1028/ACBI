@@ -1040,7 +1040,8 @@ def answer_one(
                 # Every AI key is resting or slow: plain wording needs no model.
                 raw = local_intent(first)
                 if raw is None and (prior or {}).get("slots"):
-                    raw = follow_up_intent(first)  # the earlier turn fills the rest
+                    # the earlier turn fills in the rest
+                    raw = follow_up_intent(first, prior["slots"])
                 if raw is None:
                     raise
         if later:

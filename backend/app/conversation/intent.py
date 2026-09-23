@@ -21,6 +21,7 @@ from app.core.dates import (
     compares_two_periods,
     intent_hints,
     is_confirmation,
+    named_periods,
     single_dimension,
     territory_names,
 )
@@ -174,7 +175,7 @@ EXTREME = re.compile(
 def _verify_extreme(
     current: dict[str, Any], hints: dict[str, Any], question: str
 ) -> None:
-    """"Is Canada the highest?" is answered against every territory, not for Canada."""
+    """ "Is Canada the highest?" is answered against every territory, not for Canada."""
     value = fold(question)
     vocab = vocabulary.get()
     if not EXTREME.search(value):
@@ -200,7 +201,7 @@ def _verify_extreme(
 
 
 def _stacked_by_month(current: dict[str, Any], question: str) -> None:
-    """"By month ... stacked" for two territories: months, stacked by territory."""
+    """ "By month ... stacked" for two territories: months, stacked by territory."""
     value = fold(question)
     vocab = vocabulary.get()
     if (
@@ -365,7 +366,7 @@ def merged_intent(
     ):
         current["dimension"] = slots["dimension"]
     _close_end(current)
-    if current["period"] == "explicit" and not hints:
+    if current["period"] == "explicit" and not any(k in hints for k in PERIOD_KEYS):
         if intent.period is None or not (current["start_date"] or current["end_date"]):
             # No dates of its own (a half-given new date is asked about instead).
             for field in ("start_date", "end_date"):
@@ -682,7 +683,9 @@ def local_unsupported(question: str) -> Intent | None:
     )
 
 
-def follow_up_intent(question: str) -> Intent | None:
+def follow_up_intent(
+    question: str, slots: dict[str, Any] | None = None
+) -> Intent | None:
     """A short follow-up ("Canada thì sao", "theo khu vực") read without a model.
 
     Only what the message itself says is filled (a member); the metric, period and
@@ -690,7 +693,12 @@ def follow_up_intent(question: str) -> Intent | None:
     a comparison, which needs more than the earlier turn can give."""
     value = fold(question)
     if re.search(COMPARE_WORDS, value):
-        return None
+        # "So sánh với 2023": readable with one period named and one on screen.
+        from app.query.comparison import with_earlier_period
+
+        if not with_earlier_period(named_periods(question), slots or {}):
+            return None
+    top = re.search(r"\btop\s*(\d{1,3})\b", value)
     members = vocabulary.get().match_members(value)
     factories = members.get("factory", [])
     territories = members.get("sales_territory", [])
@@ -707,7 +715,7 @@ def follow_up_intent(question: str) -> Intent | None:
                 else None
             ),
             "territory": "|".join(territories) or None,
-            "limit": 100,
+            "limit": min(int(top.group(1)), 250) if top else 100,
             "needs_clarification": False,
             "clarification_question": None,
             "zero_scrap_only": False,
@@ -766,9 +774,7 @@ def local_comparison_intent(question: str) -> Intent | None:
         dimension = "sales_territory"
     if dimension == "none" and len(factories) >= 2:
         dimension = "factory"  # several named: one row each, not a filter
-    factory_id = (
-        vocab.ids("factory").get(factories[0]) if len(factories) == 1 else None
-    )
+    factory_id = vocab.ids("factory").get(factories[0]) if len(factories) == 1 else None
     return Intent.model_validate(
         {
             "metric_id": metric,
@@ -878,12 +884,16 @@ def split_tasks(question: str) -> list[str]:
             for dimension, names in vocab.members.items()
             for name in names
         )
-        starts = index and not continues and (
-            re.search(TASK_WORDS, part)
-            or (re.search(RANK_WORDS, part) and own_period)
-            or (re.match(IMPERATIVE, part) and (found or own_period))
-            or (found and found != first)
-            or (found and own_period and first_owns_period and not first_compares)
+        starts = (
+            index
+            and not continues
+            and (
+                re.search(TASK_WORDS, part)
+                or (re.search(RANK_WORDS, part) and own_period)
+                or (re.match(IMPERATIVE, part) and (found or own_period))
+                or (found and found != first)
+                or (found and own_period and first_owns_period and not first_compares)
+            )
         )
         if starts or not tasks:
             tasks.append(original)
