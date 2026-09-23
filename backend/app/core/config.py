@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     warehouse_password: SecretStr
     warehouse_sslmode: str = "verify-full"
     app_db_host: str = "db"
+    app_db_sslmode: str = "prefer"
     app_db_user: str = "acbi_app"
     app_db_password: SecretStr
     app_db_name: str = "acbi"
@@ -100,4 +101,5 @@ class Settings(BaseSettings):
             password=self.app_db_password.get_secret_value(),
             host=self.app_db_host,
             database=self.app_db_name,
+            query={"sslmode": self.app_db_sslmode},
         )

@@ -1,0 +1,13 @@
+.tools
+.claude
+.github
+hf
+deploy
+docs
+scripts
+frontend/node_modules
+frontend/dist
+backend/tests
+**/__pycache__
+data/eval
+pyproject.toml

@@ -7,7 +7,7 @@ language (Vietnamese or English) and get a chart, a table and a one-line answer.
 Every number comes from a vetted data query, not from the AI, and every answer shows
 its source so you can check it. No SQL or programming knowledge is needed.
 
-- **Live demo:** the link is printed when the demo tunnel starts (it changes each time).
+- **Live demo:** https://acbi-liard.vercel.app (Vercel + Neon, always on; see [docs/VERCEL_DEPLOY.md](docs/VERCEL_DEPLOY.md)).
   The login page has "Login as manager / sales / production_a / it_admin" buttons.
 - **In-app guide:** click **Guide** in the top bar of the web app (also at `/#guide`),
   in English and Vietnamese. It covers everything below in more detail.
@@ -97,7 +97,7 @@ off the passwordless demo buttons. Language-model keys go in `deploy/.env` (Groq
 ## More documentation
 
 - [Assumptions and approval decisions](docs/ASSUMPTIONS.md) · [Architecture](docs/ARCHITECTURE.md) · [Runbook](docs/RUNBOOK.md) · [API](docs/API.md)
-- [Current status and limitations](docs/CURRENT_STATUS.md) · [Local demo](docs/LOCAL_DEMO.md)
+- [Current status and limitations](docs/CURRENT_STATUS.md) · [Local demo](docs/LOCAL_DEMO.md) · [Hosted demo](docs/VERCEL_DEPLOY.md)
 - Phase reports: [0](docs/PHASE_0_REPORT.md), [1](docs/PHASE_1_REPORT.md), [2](docs/PHASE_2_REPORT.md), [3](docs/PHASE_3_REPORT.md), [4](docs/PHASE_4_REPORT.md)
 - [Approved dictionary](data/business_dictionary/dictionary.yaml) · [Golden questions](data/eval/golden_questions.yaml)
 
@@ -112,7 +112,7 @@ ACBI cho phép bất kỳ ai hỏi về **doanh thu, sản xuất và chất lư
 con số đều do câu lệnh dữ liệu đã được kiểm duyệt tính ra, không phải AI tự nghĩ, và mỗi
 câu trả lời đều ghi nguồn để bạn kiểm chứng. Không cần biết SQL hay lập trình.
 
-- **Bản demo trực tuyến:** đường dẫn hiện ra mỗi khi mở đường hầm demo (mỗi lần một khác).
+- **Bản demo trực tuyến:** https://acbi-liard.vercel.app (Vercel + Neon, chạy liên tục; xem [docs/VERCEL_DEPLOY.md](docs/VERCEL_DEPLOY.md)).
   Trang đăng nhập có các nút "Đăng nhập với manager / sales / production_a / it_admin".
 - **Hướng dẫn trong ứng dụng:** bấm **Hướng dẫn** ở thanh trên cùng (hoặc mở `/#guide`),
   có cả tiếng Việt và tiếng Anh, chi tiết hơn phần dưới đây.

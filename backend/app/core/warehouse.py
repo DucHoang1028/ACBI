@@ -10,7 +10,8 @@ def warehouse_engine(settings: Settings) -> Engine:
     return create_engine(
         settings.warehouse_url(),
         pool_pre_ping=True,
-        connect_args={"connect_timeout": 5},
+        # No server-side prepared statements: hosted poolers (Neon) do not keep them.
+        connect_args={"connect_timeout": 5, "prepare_threshold": None},
         hide_parameters=True,
     )
 

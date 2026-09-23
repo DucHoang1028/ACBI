@@ -20,3 +20,7 @@ data/eval/results.local.json
 deploy/certs/
 
 deploy/llm-providers.local
+deploy/neon.local
+
+.vercel
+.env*

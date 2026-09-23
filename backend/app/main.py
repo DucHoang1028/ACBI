@@ -31,11 +31,16 @@ from app.metadata.vocabulary import install as install_vocabulary
 logger = logging.getLogger("acbi.startup")
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+def startup(app: FastAPI) -> None:
+    """Connect, migrate and load metadata (also called by api/index.py)."""
     settings = Settings()  # type: ignore[call-arg]
     warehouse = warehouse_engine(settings)
-    storage = create_engine(settings.application_url(), hide_parameters=True)
+    storage = create_engine(
+        settings.application_url(),
+        hide_parameters=True,
+        pool_pre_ping=True,
+        connect_args={"prepare_threshold": None},
+    )
     try:
         anchor = inspect_anchor(warehouse, settings.data_as_of)
         dictionary = load_dictionary(Path(settings.data_dir))
@@ -91,10 +96,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             ),
         }
         logger.info("Warehouse anchor checked: %s", anchor)
-        yield
-    finally:
+    except BaseException:
         warehouse.dispose()
         storage.dispose()
+        raise
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    startup(app)
+    try:
+        yield
+    finally:
+        app.state.warehouse.dispose()
+        app.state.storage.dispose()
 
 
 app = FastAPI(title="ACBI Phase 4", lifespan=lifespan)
