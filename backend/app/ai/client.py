@@ -733,9 +733,10 @@ class GroqClient:
                 except httpx.TransportError as failure:
                     self.pool.failed(state, None, None)
                     logger.warning(
-                        "llm %s failed on %s: transport error; trying next key",
+                        "llm %s failed on %s: transport error %s; trying next key",
                         name,
                         state.label,
+                        type(failure).__name__,
                     )
                     error = failure
                 except ValueError as failure:
