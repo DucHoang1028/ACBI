@@ -64,6 +64,10 @@ class Settings(BaseSettings):
             raise ValueError("Warehouse connections must use acbi_ro")
         return value
 
+    def has_llm_keys(self) -> bool:
+        """True when any provider (Gemini, Groq or LiteRouter) has a key."""
+        return bool(self.gemini_keys() or self.groq_keys() or self.literouter_keys())
+
     def gemini_keys(self) -> list[str]:
         raw = self.gemini_api_keys.get_secret_value().split(",")
         return list(dict.fromkeys(k.strip() for k in raw if k.strip()))

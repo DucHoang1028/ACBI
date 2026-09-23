@@ -71,7 +71,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         vocab = Vocabulary(dictionary)
         load_members(warehouse, vocab)
         install_vocabulary(vocab)
-        app.state.llm = GroqClient(settings) if settings.groq_keys() else None
+        app.state.llm = GroqClient(settings) if settings.has_llm_keys() else None
         app.state.stt = GroqSTT(settings) if settings.groq_keys() else None
         app.state.dictionary = dictionary
         app.state.readiness = {

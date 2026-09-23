@@ -201,3 +201,11 @@ def test_a_key_with_a_gap_is_not_offered_again_until_the_gap_has_passed() -> Non
     pool.reserve(pool.states[0], 100)
     assert pool.available(100) == []
     assert 6.0 < pool.wait_time(100) <= 7.0
+
+
+def test_any_provider_key_switches_the_model_on() -> None:
+    common = {"_env_file": None, "warehouse_password": "x", "app_db_password": "x"}
+    assert not Settings(**common).has_llm_keys()
+    assert Settings(gemini_api_keys="g", **common).has_llm_keys()
+    assert Settings(literouter_api_key="l", **common).has_llm_keys()
+    assert Settings(groq_api_key="k", **common).has_llm_keys()
