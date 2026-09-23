@@ -31,6 +31,7 @@ from app.conversation.intent import (
     first_clause,
     first_metric,
     first_task_text,
+    follow_up_intent,
     local_comparison_intent,
     local_intent,
     local_unsupported,
@@ -1031,6 +1032,8 @@ def answer_one(
             except (LLMBusy, httpx.HTTPError):
                 # Every AI key is resting or slow: plain wording needs no model.
                 raw = local_intent(first)
+                if raw is None and (prior or {}).get("slots"):
+                    raw = follow_up_intent(first)  # the earlier turn fills the rest
                 if raw is None:
                     raise
         if later:

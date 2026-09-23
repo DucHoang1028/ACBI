@@ -30,7 +30,7 @@ Root `requirements.txt` is what Vercel installs; `pyproject.toml` is excluded in
 
 Variables (use the Neon *pooled* host for both): `WAREHOUSE_HOST`, `WAREHOUSE_SSLMODE=require`,
 `WAREHOUSE_PASSWORD`, `APP_DB_HOST`, `APP_DB_SSLMODE=require`, `APP_DB_PASSWORD`,
-`DEMO_LOGIN_ENABLED=true`, `EXTERNAL_METADATA_ENABLED=true`,
+`DEMO_LOGIN_ENABLED=true`, `EXTERNAL_METADATA_ENABLED=true`, `LOCAL_INTENT_ENABLED=true` (plain questions are read by rules, sparing the free AI quota; the AI handles the rest),
 `LLM_PROVIDER_ORDER=gemini,groq,literouter`, `GEMINI_API_KEYS`, `LITEROUTER_API_KEY`.
 
 ## Limits to know

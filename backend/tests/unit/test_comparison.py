@@ -407,3 +407,34 @@ def test_dates_the_calendar_does_not_have_are_caught() -> None:
         "so sánh tháng 12/2024 và tháng 1/2025",
     ):
         assert impossible_date(fine) is None, fine
+
+
+def test_shouting_and_acronyms_are_not_unknown_names() -> None:
+    from app.conversation.intent import unfamiliar_name
+
+    assert not unfamiliar_name("DOANH THU QUÝ TRƯỚC")
+    assert not unfamiliar_name("Doanh thu năm 2024 dạng thẻ KPI")
+    assert unfamiliar_name("Doanh thu Wakanda năm 2024")
+
+
+def test_a_short_follow_up_can_be_read_without_a_model() -> None:
+    from app.conversation.intent import follow_up_intent, merged_intent
+
+    prior = {
+        "slots": {
+            "metric_id": "revenue", "dimension": "none", "period": "explicit",
+            "start_date": "2025-01-01", "end_date": "2025-06-30", "factory_id": None,
+            "territory": None, "limit": 100, "series_dimension": "none",
+        }
+    }  # fmt: skip
+    raw = follow_up_intent("Canada thì sao")
+    assert raw is not None and raw.territory == "Canada" and raw.metric_id is None
+    merged = merged_intent(raw, prior, "Canada thì sao")
+    assert (merged.metric_id, merged.territory, merged.period) == (
+        "revenue",
+        "Canada",
+        "explicit",
+    )
+    by_area = merged_intent(follow_up_intent("theo khu vực"), prior, "theo khu vực")
+    assert by_area.dimension == "sales_territory" and by_area.metric_id == "revenue"
+    assert follow_up_intent("so với năm ngoái thì sao") is None

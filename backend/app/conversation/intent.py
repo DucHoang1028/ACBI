@@ -282,6 +282,7 @@ def merged_intent(
         or intent.metric_id
         or intent.period
         or intent.dimension != "none"
+        or current["dimension"] != "none"  # "theo khu vực" read from the wording
         or intent.territory
         or intent.factory_id is not None
         or intent.start_date
@@ -675,6 +676,39 @@ def local_unsupported(question: str) -> Intent | None:
     )
 
 
+def follow_up_intent(question: str) -> Intent | None:
+    """A short follow-up ("Canada thì sao", "theo khu vực") read without a model.
+
+    Only what the message itself says is filled (a member); the metric, period and
+    breakdown come from the earlier turn when the intent is merged with it. None for
+    a comparison, which needs more than the earlier turn can give."""
+    value = fold(question)
+    if re.search(COMPARE_WORDS, value):
+        return None
+    members = vocabulary.get().match_members(value)
+    factories = members.get("factory", [])
+    territories = members.get("sales_territory", [])
+    return Intent.model_validate(
+        {
+            "metric_id": None,
+            "dimension": "none",
+            "period": None,
+            "start_date": None,
+            "end_date": None,
+            "factory_id": (
+                vocabulary.get().ids("factory").get(factories[0])
+                if len(factories) == 1
+                else None
+            ),
+            "territory": "|".join(territories) or None,
+            "limit": 100,
+            "needs_clarification": False,
+            "clarification_question": None,
+            "zero_scrap_only": False,
+        }
+    )
+
+
 def unfamiliar_name(question: str) -> bool:
     """A capitalised word (not the first) that names no metric, breakdown or member.
 
@@ -691,10 +725,13 @@ def unfamiliar_name(question: str) -> bool:
     terms += [s for d in vocab.dimensions.values() for s in d.synonyms]
     familiar = {word for term in terms for word in fold(term).split()} | TITLE_WORDS
     familiar |= {*MONTH_NAMES, *(m[:3] for m in MONTH_NAMES), "sept", "adventureworks"}
+    if question.isupper():
+        return False  # shouting carries no information about names
     for index, word in enumerate(re.findall(r"[^\W\d_]{2,}", question)):
         folded = fold(word)
         forms = {folded, re.sub(r"ies$", "y", folded), folded.rstrip("s")}
-        if index and word[:1].isupper() and not forms & familiar:
+        acronym = word.isupper() and len(word) <= 4  # KPI, USD, VIP
+        if index and word[:1].isupper() and not acronym and not forms & familiar:
             return True
     return False
 
