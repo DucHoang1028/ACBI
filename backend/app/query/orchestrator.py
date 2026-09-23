@@ -46,6 +46,7 @@ from app.core.dates import (
     mentions_time,
     metric_words,
     month_start,
+    single_dimension,
 )
 from app.core.text import fold
 from app.history.service import audit, latest_in_conversation
@@ -67,6 +68,15 @@ from app.presentation.visualization import (
     reshaped,
 )
 from app.query.builder import authorize, build, prepare, supports
+from app.query.comparison import (
+    GROUP_COLUMN,
+    MAX_PERIODS,
+    Period,
+    adjacent,
+    label,
+    named_periods,
+    side_by_side,
+)
 from app.query.forecast import (
     METHOD_VERSION,
     ForecastRefused,
@@ -562,6 +572,160 @@ def run_forecast(
     return 200, payload
 
 
+def run_comparison(
+    intent: Intent,
+    body: AskRequest,
+    user: dict[str, Any],
+    state: Any,
+    budget: RequestBudget,
+    anchor: date,
+    request_id: str,
+    conversation_id: str,
+    prior: dict[str, Any] | None,
+    periods: list[Period],
+) -> tuple[int, dict[str, Any]]:
+    """One metric across the periods named in the question, side by side."""
+    storage, vi = state.storage, body.language == "vi"
+
+    def ask_again(text_out: str) -> tuple[int, dict[str, Any]]:
+        text_out = unstick(text_out, prior, body.language)
+        save_context(
+            storage,
+            conversation_id,
+            user["id"],
+            carry_slots(prior, intent),
+            text_out,
+            next_turns(prior, body.question, text_out),
+        )
+        return 200, response(
+            "needs_clarification", text_out, request_id, conversation_id
+        )
+
+    checked = validate_choices(intent, body.question)
+    if not intent.metric_id or {"factory_id", "territory"} & set(
+        checked.missing_fields
+    ):
+        return ask_again(clarification_text(checked, body.language))
+    intent = checked.model_copy(
+        update={"needs_clarification": False, "missing_fields": []}
+    )
+    if len(periods) > MAX_PERIODS or len({p[0] for p in periods}) > 1:
+        return ask_again(
+            "Hãy so sánh tối đa 4 kỳ cùng loại: cùng là năm, cùng là quý hoặc cùng "
+            "là tháng."
+            if vi
+            else "Please compare up to 4 periods of the same kind: all years, all "
+            "quarters or all months."
+        )
+    territories = intent.territory.split("|") if intent.territory else []
+    group = GROUP_COLUMN.get(intent.dimension)
+    if (intent.dimension == "sales_territory" and len(territories) == 1) or (
+        intent.dimension == "factory" and intent.factory_id is not None
+    ):
+        group = None  # one member named: a filter, not a breakdown
+    base = intent.model_copy(
+        update={
+            "dimension": intent.dimension if group else "none",
+            "series_dimension": "none",
+            "period": "explicit",
+            "limit": 100,
+        }
+    )
+    factory_names = [
+        name
+        for name, number in vocabulary.get().ids("factory").items()
+        if number == intent.factory_id
+    ]
+    results: list[tuple[str, list[dict[str, Any]]]] = []
+    plans = []
+    for period in periods:
+        one = base.model_copy(
+            update={
+                "start_date": period[1].isoformat(),
+                "end_date": period[2].isoformat(),
+            }
+        )
+        try:
+            authorize(one, user["role"])
+            check_definition(one, state.dictionary)
+            plan, _, _ = route_query(
+                body.question, one, user["role"], anchor, state, budget
+            )
+        except ValueError as error:  # PermissionError propagates to the caller
+            return ask_again(friendly(error, body.language))
+        rows = run_query(state.warehouse, plan, budget)
+        results.append((label(period, body.language), rows))
+        plans.append(plan)
+    table, answer_text = side_by_side(
+        intent.metric_id,
+        results,
+        group,
+        "" if group else ", ".join(territories + factory_names),
+        body.language,
+    )
+    payload = response(
+        "ok" if table else "no_data",
+        "Results found" if table else "No data for these periods",
+        request_id,
+        conversation_id,
+    )
+    payload.update(table=table, answer_text=answer_text, llm_calls=budget.calls)
+    payload["sources"] = {
+        "source": "Adventureworks",
+        "sql": "\n\n".join(plan.sql for plan in plans),
+        "parameters": {
+            k: str(v) if isinstance(v, date) else v for k, v in plans[-1].params.items()
+        },
+        "retrieved_at": datetime.now(timezone.utc).isoformat(),
+        "metric_versions": {intent.metric_id: plans[-1].version},
+        "data_as_of": anchor.isoformat(),
+        "anchor_source": state.readiness["anchor_source"],
+        "references": [],
+    }
+    if table:
+        wanted = requested_chart(body.question)
+        if group and not wanted:
+            viz = validate_viz(
+                VizConfig(
+                    type="bar",
+                    x=group,
+                    y=[name for name, found in results if found],
+                    series=None,
+                ),
+                table,
+            )
+            payload["viz_config"], payload["chart_fallback"] = viz.model_dump(), False
+        else:
+            viz_dict, note = reshaped(wanted or "bar", table, body.language)
+            payload["viz_config"] = viz_dict
+            payload["chart_fallback"] = viz_dict["type"] == "table"
+            if wanted and viz_dict["type"] != wanted:
+                payload["answer_text"] = f"{answer_text} {note}"
+    last = periods[-1]
+    save_context(
+        storage,
+        conversation_id,
+        user["id"],
+        {
+            **base.model_dump(),
+            "start_date": last[1].isoformat(),
+            "end_date": last[2].isoformat(),
+            "shown": shown_members(table),
+        },
+        None,
+        next_turns(prior, body.question, None),
+    )
+    persist(
+        storage,
+        user["id"],
+        body.question,
+        intent.metric_id,
+        authorize(base, user["role"]),
+        payload,
+    )
+    return 200, payload
+
+
 def answer(
     body: AskRequest,
     user: dict[str, Any],
@@ -722,28 +886,6 @@ def answer(
             )
             outcome = result["status"]
             return 200, result
-        if compares_two_periods(body.question):
-            outcome = "needs_clarification"
-            question = (
-                "Tôi chưa so sánh trực tiếp hai năm hoặc hai kỳ tùy chọn; tăng trưởng "
-                "chỉ tính cho tháng hoặc quý gần nhất so với kỳ liền trước. Hãy hỏi "
-                "doanh thu của từng kỳ (ví dụ “Doanh thu năm 2024”, “Doanh thu năm "
-                "2023”) hoặc xem theo tháng."
-                if body.language == "vi"
-                else "I cannot compare two arbitrary years or periods yet; growth is "
-                "only computed for the latest month or quarter against the one "
-                "before it. Ask for each period separately (for example “Revenue "
-                "2024”, “Revenue 2023”) or view it by month."
-            )
-            save_context(
-                storage,
-                conversation_id,
-                user["id"],
-                (prior or {}).get("slots") or {},
-                None,
-                next_turns(prior, body.question, question),
-            )
-            return 200, response(outcome, question, request_id, conversation_id)
         context = {
             "data_as_of": anchor.isoformat(),
             "slots": prior["slots"] if prior else {},
@@ -792,7 +934,11 @@ def answer(
                 prior,
             )
             return 200, result
-        if raw.intent_type == "forecast":
+        # "Compare 2024 with 2030" is a comparison, not a forecast request.
+        comparing = compares_two_periods(body.question) and not re.search(
+            r"\b(?:du bao|forecast|predict)\b", fold(body.question)
+        )
+        if raw.intent_type == "forecast" and not comparing:
             # "Was that based on total revenue?" names no period of its own:
             # it asks about the forecast just given, so do not compute again.
             repeated = not mentions_time(body.question) and (
@@ -864,6 +1010,68 @@ def answer(
             )
             return 200, result
         growth_note = None
+        periods = named_periods(body.question) if comparing else []
+        if len(periods) >= 2:
+            if intent.dimension in {"month", "day", "week"} and (
+                single_dimension(fold(body.question)) != intent.dimension
+            ):  # the model added a by-month view nobody asked for
+                intent = intent.model_copy(update={"dimension": "none"})
+            if intent.dimension == "none" and "|" in (intent.territory or ""):
+                intent = intent.model_copy(update={"dimension": "sales_territory"})
+            if intent.metric_id == "sales_growth":
+                intent = intent.model_copy(update={"metric_id": "revenue"})
+            if intent.dimension in {"none", *GROUP_COLUMN}:
+                metric_id = intent.metric_id
+                try:
+                    status_code, result = run_comparison(
+                        intent,
+                        body,
+                        user,
+                        state,
+                        budget,
+                        anchor,
+                        request_id,
+                        conversation_id,
+                        prior,
+                        periods,
+                    )
+                except PermissionError:
+                    outcome = "denied"
+                    return 403, response(
+                        outcome,
+                        "Data is outside your access scope",
+                        request_id,
+                        conversation_id,
+                    )
+                outcome = result["status"]  # "and 2030" is not a second task
+                return status_code, result
+            if adjacent(periods):
+                # By month (or another breakdown) over the whole stretch: one query.
+                intent = intent.model_copy(
+                    update={
+                        "period": "explicit",
+                        "start_date": periods[0][1].isoformat(),
+                        "end_date": periods[-1][2].isoformat(),
+                    }
+                )
+                growth_note = (
+                    "Đây là kết quả cho cả khoảng thời gian liền nhau bạn nêu."
+                    if body.language == "vi"
+                    else "This covers the whole stretch of consecutive periods named."
+                )
+            else:
+                intent = intent.model_copy(
+                    update={
+                        "needs_clarification": True,
+                        "clarification_question": (
+                            "Với cách chia này tôi chỉ xem được một khoảng liền nhau. "
+                            "Hãy hỏi từng kỳ, hoặc so sánh tổng của các kỳ."
+                            if body.language == "vi"
+                            else "With that breakdown I can only show one continuous "
+                            "stretch. Ask each period separately, or compare totals."
+                        ),
+                    }
+                )
         if intent.metric_id == "sales_growth" and intent.period not in {
             "last_month",
             "last_quarter",

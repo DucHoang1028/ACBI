@@ -60,9 +60,11 @@ Several tasks in one message: the first runs, the rest are listed; type "next" t
 Charts are chosen by the shape of the result (number card, line, pie/donut, bar, stacked
 bar) and can be changed in words: "switch to a donut chart".
 
-**Not supported:** explaining reasons ("why"), splitting by quarter, comparing two
-arbitrary periods, staff / salary / customer / profit questions. The system says so
+**Not supported:** explaining reasons ("why"), splitting by quarter, staff / salary / customer / profit questions. The system says so
 instead of guessing.
+
+**Comparing periods:** ask "Compare Canada revenue 2023 and 2024" (up to 4 years, quarters or
+months of one kind, also by territory or factory). Each period is its own checked query.
 
 ## Roles
 
@@ -77,7 +79,7 @@ instead of guessing.
 
 - Sample data only (AdventureWorks, up to 2025-06-29; June 2025 is thin). Factories A/B/C are made up for the demo.
 - Five metrics. No profit, customers, staff or currency conversion, and no explanation of reasons ("why").
-- No split by quarter, no comparison of two arbitrary periods; growth only for the latest month or quarter.
+- No split by quarter; "growth" only exists for the latest month or quarter, but up to 4 years, quarters or months can be compared side by side.
 - Forecasts are a simple trend with a 24–31% test error, at most 12 months ahead.
 - Answers depend on free-tier AI providers (Gemini, LiteRouter, Groq): 2–8 s per answer, and "AI service is busy" appears when limits are hit.
 - The demo's passwordless "Login as" buttons and temporary tunnel link are for demonstration only; turn them off with `DEMO_LOGIN_ENABLED=false`.
@@ -166,8 +168,10 @@ Nhiều việc trong một câu: hệ thống làm việc đầu tiên và liệ
 "tiếp đi" để làm tiếp. Biểu đồ được chọn theo hình dạng kết quả (thẻ số, đường, tròn hoặc
 vành khuyên, cột, cột chồng) và đổi được bằng lời: "đổi sang biểu đồ vành khuyên".
 
-**Chưa hỗ trợ:** giải thích nguyên nhân ("tại sao"), chia theo quý, so sánh hai kỳ tùy ý,
+**Chưa hỗ trợ:** giải thích nguyên nhân ("tại sao"), chia theo quý,
 câu hỏi về nhân sự, lương, khách hàng, lợi nhuận. Hệ thống nói rõ điều đó thay vì đoán.
+
+**So sánh các kỳ:** hỏi "So sánh doanh thu Canada năm 2023 và 2024" (tối đa 4 năm, quý hoặc tháng cùng loại, có thể chia theo khu vực hoặc nhà máy). Mỗi kỳ là một truy vấn riêng đã được kiểm tra.
 
 ## Vai trò
 
@@ -182,7 +186,7 @@ câu hỏi về nhân sự, lương, khách hàng, lợi nhuận. Hệ thống n
 
 - Chỉ là dữ liệu mẫu (AdventureWorks, đến 29/06/2025; tháng 6/2025 rất mỏng). Nhà máy A/B/C là giả lập.
 - Năm chỉ số. Không có lợi nhuận, khách hàng, nhân sự, quy đổi tiền tệ; không giải thích nguyên nhân ("tại sao").
-- Chưa chia theo quý, chưa so sánh hai kỳ tùy ý; tăng trưởng chỉ cho tháng hoặc quý gần nhất.
+- Chưa chia theo quý; "tăng trưởng" chỉ có cho tháng hoặc quý gần nhất, nhưng so sánh cạnh nhau tối đa 4 năm, quý hoặc tháng thì được.
 - Dự báo là đường xu hướng đơn giản, sai số kiểm thử 24–31%, tối đa 12 tháng.
 - Câu trả lời phụ thuộc dịch vụ AI miễn phí (Gemini, LiteRouter, Groq): 2–8 giây mỗi câu, và có lúc báo "Hệ thống AI đang quá tải".
 - Nút "Đăng nhập với ..." không cần mật khẩu và link tunnel tạm thời chỉ dành cho demo; tắt bằng `DEMO_LOGIN_ENABLED=false`.
