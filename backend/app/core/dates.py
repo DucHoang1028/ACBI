@@ -316,6 +316,58 @@ def month_start(day: date, delta: int = 0) -> date:
     return date(index // 12, index % 12 + 1, 1)
 
 
+YEAR_AGO = (
+    r"\bcung ky (?:nam (?:truoc|ngoai)|truoc)\b|\bsame period (?:last|a) year\b|"
+    r"\byear (?:ago|earlier)\b"
+)
+BEFORE_THAT = (
+    r"\b(?P<unit>ky|quy|thang|nam|tuan) truoc do(?: nua)?\b|\btruoc do nua\b|"
+    r"\bthe (?:period|one) before(?: that)?\b"
+)
+
+
+def _minus_year(day: date) -> date:
+    try:
+        return day.replace(year=day.year - 1)
+    except ValueError:  # 29 February
+        return day.replace(year=day.year - 1, day=28)
+
+
+def shifted_period(
+    question: str, slots: dict[str, object], anchor: date
+) -> tuple[date, date] | None:
+    """"Cùng kỳ năm trước" or "quý trước đó nữa": the earlier answer's period, moved.
+
+    The year-ago wording moves the whole window back a year; the "before that"
+    wording takes the unit (or the same span) just before the window's start."""
+    value = fold(question)
+    year_ago = re.search(YEAR_AGO, value)
+    before = re.search(BEFORE_THAT, value)
+    if not (year_ago or before):
+        return None
+    try:
+        if slots.get("period") == "explicit":
+            start = date.fromisoformat(str(slots["start_date"]))
+            end = date.fromisoformat(str(slots["end_date"]))
+        else:
+            start, end = resolve_period(str(slots["period"]), anchor)
+    except (KeyError, ValueError):
+        return None
+    if year_ago:
+        return _minus_year(start), _minus_year(end)
+    assert before is not None
+    unit = before.groupdict().get("unit")
+    if unit == "quy":
+        return month_start(start, -3), start
+    if unit == "thang":
+        return month_start(start, -1), start
+    if unit == "nam":
+        return date(start.year - 1, start.month, start.day), start
+    if unit == "tuan":
+        return start - timedelta(days=7), start
+    return start - (end - start), start
+
+
 def resolve_period(name: str, anchor: date) -> tuple[date, date]:
     tomorrow = anchor + timedelta(days=1)
     monday = anchor - timedelta(days=anchor.weekday())

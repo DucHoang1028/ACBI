@@ -64,6 +64,7 @@ from app.core.dates import (
     metric_words,
     month_start,
     named_periods,
+    shifted_period,
     single_dimension,
 )
 from app.core.text import fold
@@ -614,6 +615,18 @@ def run_forecast(
     return 200, payload
 
 
+def scope_of(intent: Intent) -> str:
+    """The territories or factory a result is limited to, for the answer text."""
+    if intent.territory:
+        return ", ".join(intent.territory.split("|"))
+    names = [
+        name
+        for name, number in vocabulary.get().ids("factory").items()
+        if number == intent.factory_id
+    ]
+    return names[0] if names else ""
+
+
 def run_comparison(
     intent: Intent,
     body: AskRequest,
@@ -1161,6 +1174,20 @@ def answer_one(
                 prior,
             )
             return 200, result
+        if moved := shifted_period(
+            body.question, (prior or {}).get("slots") or {}, anchor
+        ):
+            # "Cùng kỳ năm trước", "quý trước đó nữa": the earlier period, moved.
+            intent = intent.model_copy(
+                update={
+                    "period": "explicit",
+                    "start_date": moved[0].isoformat(),
+                    "end_date": moved[1].isoformat(),
+                    "needs_clarification": False,
+                    "missing_fields": [],
+                    "clarification_question": None,
+                }
+            )
         if bad := impossible_date(body.question):
             outcome = "needs_clarification"
             question = (
@@ -1496,7 +1523,14 @@ def answer_one(
                     and plan.metric_id == "revenue"
                     and share_text(rows, share_of, plan.start, plan.end, body.language)
                 )
-                or factual(plan.metric_id, rows, plan.start, plan.end, body.language)
+                or factual(
+                    plan.metric_id,
+                    rows,
+                    plan.start,
+                    plan.end,
+                    body.language,
+                    scope_of(intent),
+                )
             ),
             sources={
                 "source": "Adventureworks",

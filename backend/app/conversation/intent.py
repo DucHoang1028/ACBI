@@ -692,8 +692,10 @@ def follow_up_intent(
     breakdown come from the earlier turn when the intent is merged with it. None for
     a comparison, which needs more than the earlier turn can give."""
     value = fold(question)
+    metrics = vocabulary.get().match_metrics(value)
     if (
-        vocabulary.get().match_metrics(value)
+        len(metrics) > 1
+        or (metrics and not re.search(FOLLOW_UP, value))  # "còn tỷ lệ phế phẩm?" only
         or re.search(r"\b(?:du bao|forecast|predict)\b", value)
         or re.search(WHY, value)
     ):

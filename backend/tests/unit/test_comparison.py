@@ -519,3 +519,55 @@ def test_a_forecast_or_a_new_metric_is_not_read_as_a_follow_up() -> None:
     ):
         assert follow_up_intent(asked, slots) is None, asked
     assert follow_up_intent("Canada thì sao", slots) is not None
+
+
+def test_a_filtered_breakdown_names_its_scope() -> None:
+    from datetime import date
+
+    from app.presentation.summary import factual
+
+    rows = [
+        {"month": "2024-01-01", "revenue": "10.00"},
+        {"month": "2024-02-01", "revenue": "20.00"},
+    ]
+    text = factual(
+        "revenue", rows, date(2024, 1, 1), date(2025, 1, 1), "vi", "France, Germany"
+    )
+    assert "(France, Germany)" in text
+    assert "(France" not in factual(
+        "revenue", rows, date(2024, 1, 1), date(2025, 1, 1), "vi"
+    )
+
+
+def test_same_period_last_year_and_the_one_before_move_the_period_on_screen() -> None:
+    from datetime import date
+
+    from app.core.dates import shifted_period
+
+    anchor = date(2025, 6, 29)
+    year = {"period": "explicit", "start_date": "2024-01-01", "end_date": "2025-01-01"}
+    assert shifted_period("cùng kỳ năm trước", year, anchor) == (
+        date(2023, 1, 1),
+        date(2024, 1, 1),
+    )
+    quarter = {"period": "last_quarter"}  # 2025-01-01 .. 2025-04-01
+    assert shifted_period("cùng kỳ năm ngoái", quarter, anchor) == (
+        date(2024, 1, 1),
+        date(2024, 4, 1),
+    )
+    assert shifted_period("quý trước đó nữa", quarter, anchor) == (
+        date(2024, 10, 1),
+        date(2025, 1, 1),
+    )
+    same_span = shifted_period("kỳ trước đó", quarter, anchor)
+    assert same_span is not None and same_span[1] == date(2025, 1, 1)
+    assert shifted_period("doanh thu năm ngoái", year, anchor) is None
+    assert shifted_period("cùng kỳ năm trước", {}, anchor) is None
+
+
+def test_a_metric_switch_follow_up_can_be_read_without_a_model() -> None:
+    from app.conversation.intent import follow_up_intent
+
+    slots = {"metric_id": "revenue", "period": "explicit"}
+    assert follow_up_intent("còn tỷ lệ phế phẩm?", slots) is not None
+    assert follow_up_intent("tỷ lệ phế phẩm năm 2024 theo lý do", slots) is None
