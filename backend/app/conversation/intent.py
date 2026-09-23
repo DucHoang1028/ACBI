@@ -13,7 +13,10 @@ from typing import Any
 
 from app.ai.client import Intent
 from app.core.dates import (
+    COMPARE_WORDS,
     GROWTH,
+    MONTH_NAMES,
+    compares_two_periods,
     intent_hints,
     is_confirmation,
     single_dimension,
@@ -478,12 +481,22 @@ def _unknown_choice(current: dict[str, Any], question: str) -> str | None:
     for dimension, _ in vocab.capitalised_after_dimension(question):
         if deferred and named.get(dimension):
             continue
+        if current.get("dimension") == dimension and len(named.get(dimension, [])) > 1:
+            continue  # "Factory A with Factory B": a breakdown over the named members
         if metric and named.get(dimension) and dimension not in metric.dimensions:
             continue  # a known member this metric cannot be split by: not this request
         if dimension == "sales_territory" and not current.get("territory"):
             return "territory"  # named after a dimension word, yet no filter was set
         if dimension == "factory" and current.get("factory_id") is None:
             return "factory_id"
+    if (
+        metric
+        and not current.get("territory")
+        and current.get("factory_id") is None
+        and unfamiliar_name(question)
+    ):
+        # A name we do not know ("Wakanda") must be asked about, not dropped.
+        return "territory" if "sales_territory" in metric.dimensions else "factory_id"
     known = set(vocab.ids("factory").values())
     if (
         current.get("factory_id") is not None
@@ -562,6 +575,81 @@ def local_intent(question: str) -> Intent | None:
     )
 
 
+TITLE_WORDS = {
+    "by", "for", "in", "of", "and", "the", "to", "vs", "or", "per", "with", "on", "at",
+    "from", "between", "compared", "versus", "than", "against", "each", "all",
+}  # fmt: skip
+
+
+def unfamiliar_name(question: str) -> bool:
+    """A capitalised word (not the first) that names no metric, breakdown or member.
+
+    "Wakanda" in "Doanh thu Wakanda" is such a word: the data has no such place, so
+    the question must be asked about, not answered for every place."""
+    vocab = vocabulary.get()
+    terms = [
+        term
+        for dimension, names in vocab.members.items()
+        for name in names
+        for term in vocab.member_terms(dimension, name)
+    ]
+    terms += [s for m in vocab.metrics.values() for s in m.synonyms]
+    terms += [s for d in vocab.dimensions.values() for s in d.synonyms]
+    familiar = {word for term in terms for word in fold(term).split()} | TITLE_WORDS
+    familiar |= {*MONTH_NAMES, *(m[:3] for m in MONTH_NAMES), "sept", "adventureworks"}
+    for index, word in enumerate(re.findall(r"[^\W\d_]{2,}", question)):
+        folded = fold(word)
+        forms = {folded, re.sub(r"ies$", "y", folded), folded.rstrip("s")}
+        if index and word[:1].isupper() and not forms & familiar:
+            return True
+    return False
+
+
+def local_comparison_intent(question: str) -> Intent | None:
+    """The intent of "compare X across periods" from its wording, with no model call.
+
+    None whenever anything is unclear (no single metric, an unfamiliar name, two
+    breakdowns, a forecast), so the model decides. The periods come from the text."""
+    value = fold(question)
+    if not compares_two_periods(question) or re.search(
+        r"\b(?:du bao|forecast|predict)\b", value
+    ):
+        return None
+    vocab = vocabulary.get()
+    metric = intent_hints(question).get("metric_id")
+    dimension = single_dimension(value)
+    if not metric or dimension is None or unfamiliar_name(question):
+        return None
+    if vocab.unknown_member_reference(value):
+        return None
+    members = vocab.match_members(value)
+    territories = members.get("sales_territory", [])
+    factories = members.get("factory", [])
+    if dimension == "none" and len(territories) >= 2:
+        dimension = "sales_territory"
+    if dimension == "none" and len(factories) >= 2:
+        dimension = "factory"  # several named: one row each, not a filter
+    factory_id = (
+        vocab.ids("factory").get(factories[0]) if len(factories) == 1 else None
+    )
+    return Intent.model_validate(
+        {
+            "metric_id": metric,
+            "dimension": dimension,
+            "period": "explicit",
+            "start_date": None,
+            "end_date": None,
+            "factory_id": factory_id,
+            "territory": "|".join(territories) or None,
+            "limit": 100,
+            "needs_clarification": False,
+            "clarification_question": None,
+            "zero_scrap_only": False,
+            "intent_type": "comparison",
+        }
+    )
+
+
 def clarification_text(intent: Intent, language: str) -> str:
     """Wording for an unresolved request; the model's own question comes first."""
     vi = language == "vi"
@@ -612,46 +700,78 @@ def clarification_text(intent: Intent, language: str) -> str:
     )
 
 
-SPLIT = re.compile(
-    r",|;|\bvà\b|\brồi\b|\bluôn\b|\bsau đó\b|\bnữa\b|\band\b|\bthen\b"
-)
+SPLIT = re.compile(r",|;|\bvà\b|\brồi\b|\bluôn\b|\bsau đó\b|\bnữa\b|\band\b|\bthen\b")
 CLAUSE = re.compile(r",|;|\bva\b|\broi\b|\bluon\b|\bsau do\b|\bnua\b|\band\b|\bthen\b")
 
 
-def further_requests(question: str) -> list[str]:
-    """Later tasks of a message that names several metrics, in the user's own words.
+def split_tasks(question: str) -> list[str]:
+    """The requests in a message, in order and in the user's own words.
 
-    The model is asked to list them; when it does not, the clauses that name another
-    metric than the first one are kept so none is dropped without a word."""
+    A clause starts a new request when it names another metric, asks to compare,
+    forecast or rank, asks to show something with a period of its own, or repeats
+    the metric with a period of its own after a first clause that had one. Any other
+    clause (a bare period, a breakdown, a chart) stays with the request before it."""
     vocab = vocabulary.get()
     parts = [p.strip(" .?!") for p in CLAUSE.split(fold(question)) if p.strip()]
     originals = SPLIT.split(question)
     originals = [o.strip(" .?!") for o in originals if o.strip()]
-    if len(parts) != len(originals):
-        return []
+    if len(parts) != len(originals) or len(parts) < 2:
+        return [question]
     first: set[str] = set()
     for part in parts:
         if found := set(vocab.match_metrics(part)):
             first = found
             break
-    later = [
-        original
-        for index, (part, original) in enumerate(zip(parts, originals))
-        if index
-        and (
+    first_owns_period = bool(re.search(OWN_PERIOD, parts[0]))
+    first_compares = bool(re.search(COMPARE_WORDS, parts[0]))
+    tasks: list[str] = []
+    for index, (part, original) in enumerate(zip(parts, originals)):
+        found = set(vocab.match_metrics(part))
+        own_period = bool(re.search(OWN_PERIOD, part))
+        starts = index and (
             re.search(TASK_WORDS, part)
-            or (re.search(RANK_WORDS, part) and re.search(OWN_PERIOD, part))
-            or ((found := set(vocab.match_metrics(part))) and found != first)
+            or (re.search(RANK_WORDS, part) and own_period)
+            or (re.match(IMPERATIVE, part) and (found or own_period))
+            or (found and found != first)
+            or (found and own_period and first_owns_period and not first_compares)
         )
-    ]
-    return later[:4]
+        if starts or not tasks:
+            tasks.append(original)
+        else:
+            bare_period = not re.sub(PERIOD_TOKEN, "", part).strip()
+            tasks[-1] += f"{' và ' if bare_period else ', '}{original}"
+    return tasks[:9] if len(tasks) > 1 else [question]
+
+
+def further_requests(question: str) -> list[str]:
+    """Later requests of a message that holds several, in the user's own words.
+
+    The model is asked to list them; when it does not, these are kept so none is
+    dropped without a word."""
+    return split_tasks(question)[1:]
 
 
 TASK_WORDS = r"\b(?:du bao|forecast|so sanh|compare)\b"
-RANK_WORDS = r"\b(?:top\s*\d+|ban chay)\b"  # a task only with a period of its own
-OWN_PERIOD = r"\b(?:nam\s+\d{4}|thang\s+\d{1,2}|quy\s+\d|(?:this|last)\s+\w+)\b|" + (
-    RELATIVE_PERIOD
+IMPERATIVE = (
+    r"^(?:show|list|give|display|plot|draw|cho toi|cho minh|hien thi|xem|ve|"
+    r"liet ke|tinh|tim)\b"
 )
+PERIOD_TOKEN = r"\b(?:nam|thang|quy|year|quarter|month|q[1-4]|20\d{2}|\d{1,2})\b"
+RANK_WORDS = r"\b(?:top\s*\d+|ban chay)\b"  # a task only with a period of its own
+OWN_PERIOD = (
+    r"\b(?:nam\s+\d{4}|20\d{2}|thang\s+\d{1,2}|quy\s+\d|(?:this|last)\s+\w+)\b|"
+    + RELATIVE_PERIOD
+)
+
+
+def first_task_text(question: str, later: list[str]) -> str:
+    """The question without the requests left for later, when they appear as written."""
+    text = question
+    for task in later:
+        text = re.sub(re.escape(task), " ", text, count=1, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text).strip(" ,;.")
+    text = re.sub(r"(?:,|;|\b(?:và|and|rồi|then)\b)\s*$", "", text).strip(" ,;.")
+    return text or question
 
 
 def first_clause(question: str) -> str:

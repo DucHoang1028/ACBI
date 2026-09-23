@@ -56,7 +56,8 @@ Examples that work:
 - `Forecast revenue for the next 6 months` (always labelled as a forecast)
 - `Which metrics can you report? How is revenue calculated?`
 
-Several tasks in one message: the first runs, the rest are listed; type "next" to continue.
+Several tasks in one message: every task (up to 5) is run and each result is shown
+in turn, numbered, with its own chart, table and sources.
 Charts are chosen by the shape of the result (number card, line, pie/donut, bar, stacked
 bar) and can be changed in words: "switch to a donut chart".
 
@@ -164,8 +165,8 @@ Ví dụ hỏi được:
 - `Dự báo doanh thu 6 tháng tới` (luôn ghi rõ là dự báo)
 - `Bạn báo cáo được những chỉ số nào? Doanh thu tính thế nào?`
 
-Nhiều việc trong một câu: hệ thống làm việc đầu tiên và liệt kê các việc còn lại; gõ
-"tiếp đi" để làm tiếp. Biểu đồ được chọn theo hình dạng kết quả (thẻ số, đường, tròn hoặc
+Nhiều việc trong một câu: hệ thống làm tất cả (tối đa 5 việc) và hiện lần lượt từng kết
+quả, có đánh số, mỗi kết quả có biểu đồ, bảng và nguồn riêng. Biểu đồ được chọn theo hình dạng kết quả (thẻ số, đường, tròn hoặc
 vành khuyên, cột, cột chồng) và đổi được bằng lời: "đổi sang biểu đồ vành khuyên".
 
 **Chưa hỗ trợ:** giải thích nguyên nhân ("tại sao"), chia theo quý,

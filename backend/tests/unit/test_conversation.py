@@ -480,16 +480,19 @@ def test_tolerant_option_picking_and_a_new_number_is_a_new_request() -> None:
 def test_requests_left_for_later_are_named_in_the_answer() -> None:
     from app.query.orchestrator import note_deferred
 
-    raw = intent(deferred_requests=["dự báo sản lượng 3 tháng"])
+    later = ["dự báo sản lượng 3 tháng"]
     result = {"status": "ok", "answer_text": "Doanh thu là 10."}
-    note_deferred(result, raw, "vi")
+    note_deferred(result, later, "vi")
     assert "dự báo sản lượng 3 tháng" in result["answer_text"]
     assert result["answer_text"].startswith("Doanh thu là 10.")
+    asking = {"status": "needs_clarification", "message": "Kỳ nào?"}
+    note_deferred(asking, later, "vi")
+    assert asking["message"].startswith("Kỳ nào?") and "dự báo" in asking["message"]
     refused = {"status": "denied", "message": "Không có quyền."}
-    note_deferred(refused, raw, "vi")
+    note_deferred(refused, later, "vi")
     assert "answer_text" not in refused
     untouched = {"status": "ok", "answer_text": "Xong."}
-    note_deferred(untouched, intent(), "vi")
+    note_deferred(untouched, [], "vi")
     assert untouched["answer_text"] == "Xong."
 
 
@@ -599,6 +602,13 @@ def test_comparing_with_another_territory_keeps_both() -> None:
         ("Doanh thu Q1 2025 so với Q1 2024", True),
         ("Tăng trưởng năm 2024 so với 2023 là bao nhiêu?", True),
         ("Doanh thu năm 2024", False),
+        ("How did revenue change between 2023 and 2024 in Germany?", True),
+        ("Doanh thu năm 2024 khác gì năm 2023", True),
+        ("Doanh thu tháng 1 đến tháng 3 năm 2025 thay đổi thế nào", False),
+        ("Revenue 2024 compared to 2023", True),
+        ("So sánh doanh thu tháng 1 và tháng 2 năm 2025", True),
+        ("So sánh doanh thu quý 1 và quý 2 năm 2025", True),
+        ("So sánh doanh thu tháng này với tháng trước", False),
         ("Doanh thu từ năm 2022 đến 2025 tăng trưởng thế nào", False),
         ("Doanh thu Đức Pháp Anh Úc năm 2024 so sánh giúp mình", False),
     ],

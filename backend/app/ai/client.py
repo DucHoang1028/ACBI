@@ -85,7 +85,7 @@ class Intent(BaseModel):
     intent_type: str = "metric_query"
     horizon_months: int | None = Field(default=None, ge=1, le=36)
     # Further requests in the same message that were not interpreted here.
-    deferred_requests: list[str] = Field(default_factory=list, max_length=4)
+    deferred_requests: list[str] = Field(default_factory=list, max_length=8)
 
     @field_validator("limit", mode="before")
     @classmethod

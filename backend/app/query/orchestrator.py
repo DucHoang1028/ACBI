@@ -22,12 +22,15 @@ from app.conversation.intent import (
     WHICH,
     chosen_option,
     clarification_text,
+    first_clause,
     first_metric,
-    further_requests,
+    first_task_text,
+    local_comparison_intent,
     local_intent,
     merged_intent,
     next_deferred,
     resume_pending,
+    split_tasks,
     unstick,
     validate_choices,
 )
@@ -40,12 +43,14 @@ from app.conversation.service import (
 from app.core.dates import (
     GROWTH,
     WHY,
+    Period,
     compares_two_periods,
     date_hints,
     is_share_question,
     mentions_time,
     metric_words,
     month_start,
+    named_periods,
     single_dimension,
 )
 from app.core.text import fold
@@ -71,10 +76,8 @@ from app.query.builder import authorize, build, prepare, supports
 from app.query.comparison import (
     GROUP_COLUMN,
     MAX_PERIODS,
-    Period,
     adjacent,
     label,
-    named_periods,
     side_by_side,
 )
 from app.query.forecast import (
@@ -94,6 +97,8 @@ from app.query.validation import (
 
 logger = logging.getLogger("acbi.chat")
 BUSY_MESSAGE = "AI service is busy"
+NOTE_STATUSES = {"ok", "no_data", "needs_clarification"}
+MAX_TASKS = 5  # requests answered from one message
 DATA_KINDS = {"metric_query", "comparison", "trend", "ranking", "needs_clarification"}
 
 
@@ -247,21 +252,23 @@ def shown_members(rows: list[dict[str, Any]]) -> dict[str, list[str]]:
     return shown
 
 
-def note_deferred(result: dict[str, Any], raw: Intent, language: str) -> None:
-    """Say plainly which requests in the message were not run, so none is dropped."""
-    if not raw.deferred_requests or result.get("status") not in {"ok", "no_data"}:
+def note_deferred(result: dict[str, Any], tasks: list[str], language: str) -> None:
+    """Say plainly which requests were not run, so none is dropped without a word."""
+    if not tasks or result.get("status") not in NOTE_STATUSES:
         return
-    listed = "; ".join(raw.deferred_requests)
+    listed = "; ".join(tasks)
     for metric in vocabulary.get().metrics.values():  # ids are not for people
         listed = listed.replace(metric.id, metric.label(language).lower())
     note = (
-        f"Tôi đã thực hiện yêu cầu đầu tiên. Chưa thực hiện: {listed}. "
+        f"Chưa thực hiện thêm: {listed} (mỗi lần tối đa {MAX_TASKS} yêu cầu). "
         "Hãy hỏi tiếp để tôi làm."
         if language == "vi"
-        else f"I ran the first request. Not run yet: {listed}. Ask again and I will."
+        else f"Not run: {listed} (at most {MAX_TASKS} requests per message). "
+        "Ask again and I will."
     )
-    base = result.get("answer_text")
-    result["answer_text"] = f"{base} {note}" if base else note
+    key = "message" if result["status"] == "needs_clarification" else "answer_text"
+    base = result.get(key)
+    result[key] = f"{base} {note}" if base else note
 
 
 def persist(
@@ -675,7 +682,8 @@ def run_comparison(
         "sql": "\n\n".join(plan.sql for plan in plans),
         "parameters": {
             k: str(v) if isinstance(v, date) else v for k, v in plans[-1].params.items()
-        },
+        }
+        | {"start": periods[0][1].isoformat(), "end": periods[-1][2].isoformat()},
         "retrieved_at": datetime.now(timezone.utc).isoformat(),
         "metric_versions": {intent.metric_id: plans[-1].version},
         "data_as_of": anchor.isoformat(),
@@ -731,6 +739,70 @@ def answer(
     user: dict[str, Any],
     state: Any,
 ) -> tuple[int, dict[str, Any]]:
+    """Run every request in the message and show each result, in order.
+
+    The first result is the response itself; the others follow in `parts`."""
+    carry: dict[str, Any] = {}
+    status, first = answer_one(body, user, state, carry)
+    queue = [t.strip() for t in carry.get("deferred", []) if t.strip()]
+    if not queue or first.get("status") == "technical_failure":
+        return status, first
+    storage, uid, conversation = state.storage, user["id"], first["conversation_id"]
+    kept = get_context(storage, conversation, uid)  # the first request's own state
+    seen = {fold(carry.get("head") or body.question), *(fold(t) for t in queue)}
+    parts: list[dict[str, Any]] = []
+    while queue and len(parts) < MAX_TASKS - 1:
+        task = queue.pop(0)
+        later: dict[str, Any] = {}
+        known = get_context(storage, conversation, uid) is not None
+        try:
+            _, part = answer_one(
+                AskRequest(
+                    question=task[:1000],
+                    conversation_id=conversation if known else None,
+                    language=body.language,
+                ),
+                user,
+                state,
+                later,
+            )
+        except HTTPException:
+            continue
+        conversation = part["conversation_id"]
+        for extra in later.get("deferred", []):
+            if extra.strip() and fold(extra) not in seen:
+                seen.add(fold(extra))
+                queue.append(extra.strip())
+        part["title"] = f"{len(parts) + 2}. {task[:1].upper()}{task[1:]}"
+        parts.append(part)
+        if part["status"] == "technical_failure":
+            break
+    if kept is not None and first["status"] == "needs_clarification":
+        # The first request is still waiting for its answer: put its state back.
+        save_context(
+            storage,
+            first["conversation_id"],
+            uid,
+            kept["slots"],
+            kept["pending_question"],
+            kept["turns"],
+        )
+    else:
+        first["conversation_id"] = conversation
+    head = carry.get("head") or first_clause(body.question)
+    first["title"] = f"1. {head[:1].upper()}{head[1:]}"
+    first["parts"] = parts
+    note_deferred(first, queue, body.language)
+    return 200, first
+
+
+def answer_one(
+    body: AskRequest,
+    user: dict[str, Any],
+    state: Any,
+    carry: dict[str, Any] | None = None,
+) -> tuple[int, dict[str, Any]]:
+    """One request. `carry["deferred"]` receives the requests left for later."""
     request_id = str(uuid4())
     conversation_id = body.conversation_id or str(uuid4())
     storage = state.storage
@@ -900,13 +972,26 @@ def answer(
         later, waiting = next_deferred(body.question, prior)
         if later:
             asked = later
-        raw = (
-            local_intent(asked) if settings.local_intent_enabled else None
-        ) or client.interpret(asked, context, budget)
+        # A message with several requests: the model reads the first one only.
+        tasks = [asked] if later else split_tasks(asked)
+        first = tasks[0]
+        raw = local_comparison_intent(first) or (
+            local_intent(first) if settings.local_intent_enabled else None
+        )
+        if raw is None:
+            try:
+                raw = client.interpret(
+                    first if len(tasks) > 1 else asked, context, budget
+                )
+            except LLMBusy:
+                # Every AI key is resting: plain wording needs no model.
+                raw = local_intent(first)
+                if raw is None:
+                    raise
         if later:
             raw = raw.model_copy(update={"deferred_requests": waiting})
         else:
-            extra = raw.deferred_requests or further_requests(body.question)
+            extra = raw.deferred_requests or tasks[1:]
             if extra:  # several tasks: run the first one, list the rest
                 update: dict[str, Any] = {"deferred_requests": extra}
                 if raw.intent_type in DATA_KINDS and (
@@ -921,6 +1006,21 @@ def answer(
                     )
                 raw = raw.model_copy(update=update)
         raw = resume_pending(raw, prior)
+        # From here on the question is the first request alone: what it says about
+        # periods, chart types or breakdowns is not read from the others.
+        head = (
+            first
+            if len(tasks) > 1
+            else first_task_text(asked, list(raw.deferred_requests))
+        )
+        body = body.model_copy(update={"question": head})
+        if carry is not None:
+            carry["deferred"] = list(raw.deferred_requests)
+            carry["head"] = head
+        # "Compare 2024 with 2030" is a comparison, not a forecast request.
+        comparing = compares_two_periods(body.question) and not re.search(
+            r"\b(?:du bao|forecast|predict)\b", fold(body.question)
+        )
         if raw.intent_type in {"chat", "metadata", "unsupported"}:
             outcome, result = run_dialogue(
                 raw,
@@ -934,10 +1034,6 @@ def answer(
                 prior,
             )
             return 200, result
-        # "Compare 2024 with 2030" is a comparison, not a forecast request.
-        comparing = compares_two_periods(body.question) and not re.search(
-            r"\b(?:du bao|forecast|predict)\b", fold(body.question)
-        )
         if raw.intent_type == "forecast" and not comparing:
             # "Was that based on total revenue?" names no period of its own:
             # it asks about the forecast just given, so do not compute again.
@@ -987,10 +1083,9 @@ def answer(
                     request_id,
                     conversation_id,
                 )
-            note_deferred(result, raw, body.language)
             outcome = result["status"]
             return status_code, result
-        intent = merged_intent(raw, prior, asked)
+        intent = merged_intent(raw, prior, body.question)
         if (
             intent.dimension == "none"
             and intent.series_dimension == "none"
@@ -1343,7 +1438,6 @@ def answer(
         result["llm_calls"] = budget.calls
         if growth_note:
             result["answer_text"] = f"{result['answer_text']} {growth_note}"
-        note_deferred(result, raw, body.language)
         persist(
             storage,
             user["id"],

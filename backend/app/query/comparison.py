@@ -3,27 +3,13 @@
 Each period is an ordinary validated query; this module only finds the periods and
 lays the results next to each other. Every figure in the text comes from the rows."""
 
-import re
-from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from app.core.dates import month_start
-from app.core.text import fold
+from app.core.dates import Period
 from app.metadata import vocabulary
 from app.presentation.analysis import amount, percent
 
-MONTH_NAMES = (
-    "january february march april may june july august september october november "
-    "december"
-).split()
-EN_MONTHS = "|".join(MONTH_NAMES + [m[:3] for m in MONTH_NAMES] + ["sept"])
-PERIOD = re.compile(
-    r"\b(?:(?:quy|quarter)\s*(?P<q>[1-4])(?:\s*(?:nam|/|of|,))?\s*(?P<qy>20\d{2})"
-    r"|thang\s*(?P<m>\d{1,2})(?:\s*(?:nam|/))?\s*(?P<my>20\d{2})"
-    rf"|(?P<em>{EN_MONTHS})\.?\s*,?\s*(?P<ey>20\d{{2}})"
-    r"|(?P<y>20\d{2}))\b"
-)
 MAX_PERIODS = 4
 # Small breakdowns that can sit side by side across periods: dimension -> column.
 GROUP_COLUMN = {
@@ -33,36 +19,6 @@ GROUP_COLUMN = {
     "production_line": "production_line",
     "scrap_reason": "reason",
 }
-Period = tuple[str, date, date]  # kind, first day, day after the last
-
-
-def named_periods(question: str) -> list[Period]:
-    """Every distinct period named in the question, oldest first."""
-    value = re.sub(r"\bq([1-4])\b", r"quy \1", fold(question))
-    found: dict[tuple[str, date], date] = {}
-    for match in PERIOD.finditer(value):
-        if match["q"]:
-            kind, start = "quarter", date(int(match["qy"]), int(match["q"]) * 3 - 2, 1)
-            end = month_start(start, 3)
-        elif match["m"] or match["em"]:
-            number = (
-                int(match["m"])
-                if match["m"]
-                else next(
-                    i
-                    for i, name in enumerate(MONTH_NAMES, 1)
-                    if name.startswith(match["em"][:3])
-                )
-            )
-            if not 1 <= number <= 12:
-                continue
-            kind, start = "month", date(int(match["my"] or match["ey"]), number, 1)
-            end = month_start(start, 1)
-        else:
-            kind, start = "year", date(int(match["y"]), 1, 1)
-            end = date(start.year + 1, 1, 1)
-        found[(kind, start)] = end
-    return sorted(((k, s, e) for (k, s), e in found.items()), key=lambda p: p[1])
 
 
 def label(period: Period, language: str) -> str:
@@ -176,10 +132,16 @@ def side_by_side(
         first, last = number(row.get(first_label)), number(row.get(last_label))
         if first and last is not None:
             moves.append((str(row[by]), (last - first) / abs(first) * 100))
-    reading = ""
+    lead = table[0]
+    lead_value = amount(number(lead.get(last_label)) or Decimal(0), metric, language)
+    reading = (
+        f" Đứng đầu {last_label}: {lead[by]} ({lead_value})."
+        if vi
+        else f" Top in {last_label}: {lead[by]} ({lead_value})."
+    )
     if moves:
         top, bottom = max(moves, key=lambda m: m[1]), min(moves, key=lambda m: m[1])
-        reading = (
+        reading += (
             f" Tăng mạnh nhất: {top[0]} ({signed(top[1], language)}); "
             f"thấp nhất: {bottom[0]} ({signed(bottom[1], language)})."
             if vi

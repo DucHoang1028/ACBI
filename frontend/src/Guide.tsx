@@ -58,7 +58,7 @@ const TIPS: Tip[] = [
   {title: t('Hỏi nối tiếp', 'Follow up'), good: t('Doanh thu năm 2024 theo khu vực → Còn năm 2023? → Chỉ lấy top 3', 'Revenue 2024 by territory → What about 2023? → Only the top 3')},
   {title: t('Chọn biểu đồ bằng lời', 'Choose the chart in words'), good: t('Đổi sang biểu đồ tròn / vành khuyên / cột / đường / bảng', 'Switch to a pie / donut / bar / line chart / table')},
   {title: t('Dự báo', 'Forecast'), good: t('Dự báo doanh thu 6 tháng tới. Kết quả luôn ghi rõ là dự báo, kèm khoảng sai số.', 'Forecast revenue for the next 6 months. Results are always labelled as forecasts, with an error range.')},
-  {title: t('Nhiều việc trong một câu', 'Several tasks in one message'), good: t('Hệ thống làm việc đầu tiên, ghi rõ việc chưa làm; gõ "tiếp đi" để làm việc kế.', 'The system does the first task and lists what is left; type "next" ("tiếp đi") to continue.')},
+  {title: t('Nhiều việc trong một câu', 'Several tasks in one message'), good: t('Hệ thống làm tất cả (tối đa 5 việc) và hiện từng kết quả theo thứ tự, có đánh số.', 'The system does every task (up to 5) and shows each result in order, numbered.')},
   {title: t('Hỏi về chính dữ liệu', 'Ask about the data itself'), good: t('Bạn báo cáo được những chỉ số nào? Dữ liệu có từ khi nào? Doanh thu tính thế nào?', 'Which metrics can you report? How far back does the data go? How is revenue calculated?')},
 ];
 

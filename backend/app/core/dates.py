@@ -189,22 +189,80 @@ def is_confirmation(question: str) -> bool:
 
 
 COMPARE_WORDS = (
-    r"\b(?:so voi|so sanh|compare|vs|tang truong|growth|chenh lech|tang bao nhieu|"
-    r"giam bao nhieu)\b"
+    r"\b(?:so voi|so sanh|compare[ds]?|comparison|vs|versus|tang truong|growth|"
+    r"chenh lech|tang bao nhieu|giam bao nhieu|thay doi|change[sd]?|difference|"
+    r"between|giua|khac nhau|khac gi)\b"
 )
 
 
-def compares_two_periods(question: str) -> bool:
-    """Two calendar years set against each other, as in "Q1 2025 so với Q1 2024".
+MONTH_NAMES = (
+    "january february march april may june july august september october november "
+    "december"
+).split()
+EN_MONTHS = "|".join(MONTH_NAMES + [m[:3] for m in MONTH_NAMES] + ["sept"])
+PERIOD = re.compile(
+    r"\b(?:(?:quy|quarter)\s*(?P<q>[1-4])(?:\s*(?:nam|/|of|,))?\s*(?P<qy>20\d{2})?"
+    r"|thang\s*(?P<m>\d{1,2})(?:\s*(?:nam|/))?\s*(?P<my>20\d{2})?"
+    rf"|(?P<em>{EN_MONTHS})\.?\s*,?\s*(?P<ey>20\d{{2}})"
+    r"|(?P<y>20\d{2}))\b"
+)
+Period = tuple[str, date, date]  # kind, first day, day after the last
 
-    Growth exists only against the period just before the latest month or quarter,
-    so an arbitrary pair of periods cannot be answered and must not be guessed."""
+
+def named_periods(question: str) -> list[Period]:
+    """Every distinct year, quarter or month named in the question, oldest first.
+
+    A quarter or month with no year of its own takes the last year mentioned
+    ("Q1 and Q2 2025"); with no year anywhere it is not a period we can place."""
+    value = re.sub(r"\bq([1-4])\b", r"quy \1", fold(question))
+    years = re.findall(r"(?<!\d)(20\d{2})(?!\d)", value)
+    default = int(years[-1]) if years else None
+    found: dict[tuple[str, date], date] = {}
+    for match in PERIOD.finditer(value):
+        if match["q"]:
+            year = int(match["qy"]) if match["qy"] else default
+            if year is None:
+                continue
+            kind, start = "quarter", date(year, int(match["q"]) * 3 - 2, 1)
+            end = month_start(start, 3)
+        elif match["m"] or match["em"]:
+            number = (
+                int(match["m"])
+                if match["m"]
+                else next(
+                    i
+                    for i, name in enumerate(MONTH_NAMES, 1)
+                    if name.startswith(match["em"][:3])
+                )
+            )
+            year = int(match["my"] or match["ey"] or 0) or default
+            if year is None or not 1 <= number <= 12:
+                continue
+            kind, start = "month", date(year, number, 1)
+            end = month_start(start, 1)
+        else:
+            kind, start = "year", date(int(match["y"]), 1, 1)
+            end = date(start.year + 1, 1, 1)
+        found[(kind, start)] = end
+    return sorted(((k, s, e) for (k, s), e in found.items()), key=lambda p: p[1])
+
+
+def compares_two_periods(question: str) -> bool:
+    """Two or more named years, quarters or months set against each other.
+
+    "Q1 2025 so với Q1 2024" or "so sánh doanh thu 2023 và 2024". Growth exists only
+    for the latest month or quarter, so these are answered side by side instead."""
     value = fold(question)
-    years = set(re.findall(r"(?<!\d)(20\d{2})(?!\d)", value))
-    is_range = re.search(r"\b(?:tu|from)\b.*\b(?:den|to)\b", value) or re.search(
-        r"\d{4}-\d{2}-\d{2}", value
+    is_range = (
+        re.search(r"\b(?:tu|from)\b.*\b(?:den|to)\b", value)
+        or re.search(r"\b(?:den|until|through)\b", value)
+        or re.search(r"\d{4}-\d{2}-\d{2}", value)
     )
-    return len(years) >= 2 and bool(re.search(COMPARE_WORDS, value)) and not is_range
+    return (
+        bool(re.search(COMPARE_WORDS, value))
+        and not is_range
+        and len(named_periods(question)) >= 2
+    )
 
 
 def month_start(day: date, delta: int = 0) -> date:
