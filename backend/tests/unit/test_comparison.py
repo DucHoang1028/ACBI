@@ -506,3 +506,16 @@ def test_top_n_and_compare_with_follow_ups_read_without_a_model() -> None:
     assert (only.start_date, only.end_date) == ("2024-01-01", "2025-01-01")
     assert follow_up_intent("so sánh với 2023", slots) is not None
     assert follow_up_intent("so sánh với 2023", {}) is None
+
+
+def test_a_forecast_or_a_new_metric_is_not_read_as_a_follow_up() -> None:
+    from app.conversation.intent import follow_up_intent
+
+    slots = {"metric_id": "revenue", "period": "explicit"}
+    for asked in (
+        "dự báo doanh thu 6 tháng tới",
+        "sản lượng cùng kỳ",
+        "tại sao lại như vậy",
+    ):
+        assert follow_up_intent(asked, slots) is None, asked
+    assert follow_up_intent("Canada thì sao", slots) is not None

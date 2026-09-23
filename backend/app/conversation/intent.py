@@ -692,6 +692,12 @@ def follow_up_intent(
     breakdown come from the earlier turn when the intent is merged with it. None for
     a comparison, which needs more than the earlier turn can give."""
     value = fold(question)
+    if (
+        vocabulary.get().match_metrics(value)
+        or re.search(r"\b(?:du bao|forecast|predict)\b", value)
+        or re.search(WHY, value)
+    ):
+        return None  # a new question or a different kind of request, not a follow-up
     if re.search(COMPARE_WORDS, value):
         # "So sánh với 2023": readable with one period named and one on screen.
         from app.query.comparison import with_earlier_period
