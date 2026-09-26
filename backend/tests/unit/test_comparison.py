@@ -107,7 +107,13 @@ def test_side_by_side_by_territory_pivots_periods_into_columns() -> None:
     ]
     table, text = side_by_side("revenue", rows, "territory", "", "en")
     assert table[0]["territory"] == "France"  # largest in the latest period first
-    assert table[1] == {"territory": "Canada", "Year 2023": "10", "Year 2024": "20"}
+    assert table[1] == {
+        "territory": "Canada",
+        "Year 2023": "10",
+        "Year 2024": "20",
+        "change_abs": "10",
+        "change_pct": "100.0",
+    }
     assert "Biggest rise: Canada (+100.0%)" in text
 
 
@@ -753,3 +759,34 @@ def test_a_top_n_share_is_measured_against_the_whole() -> None:
         "revenue", rows, Decimal(100), date(2024, 1, 1), date(2025, 1, 1), "vi"
     )
     assert text is not None and "chiếm 50,0%" in text and "A 30,0%" in text
+
+
+def test_the_pivot_ranks_by_change_and_names_the_biggest_contributor() -> None:
+    from app.query.comparison import side_by_side
+
+    rows = [
+        (
+            "Năm 2023",
+            [{"territory": "A", "revenue": "100"}, {"territory": "B", "revenue": "10"}],
+        ),
+        (
+            "Năm 2024",
+            [{"territory": "A", "revenue": "120"}, {"territory": "B", "revenue": "40"}],
+        ),
+    ]
+    table, text = side_by_side(
+        "revenue", rows, "territory", "", "vi", rank_by_change=True
+    )
+    assert [r["territory"] for r in table] == ["B", "A"]  # +300% before +20%
+    assert "đóng góp nhiều nhất: B (+30,00, 60,0% tổng thay đổi)" in text
+    plain, _ = side_by_side("revenue", rows, "territory", "", "vi")
+    assert [r["territory"] for r in plain] == ["A", "B"]  # by the latest value
+
+
+def test_from_one_year_to_the_next_with_sang_and_a_change_word_compares() -> None:
+    from app.core.dates import compares_two_periods
+
+    assert compares_two_periods(
+        "Khu vực nào đóng góp nhiều nhất vào mức tăng doanh thu từ 2023 sang 2024?"
+    )
+    assert not compares_two_periods("Doanh thu từ 2022 sang 2025")

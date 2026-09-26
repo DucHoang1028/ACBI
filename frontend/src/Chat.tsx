@@ -4,7 +4,7 @@ type Source={forecast?:Record<string,unknown>;data_as_of:string;sql:string;param
 type Answer={status:string;message:string;answer_text:string|null;table:Record<string,unknown>[];viz_config?:VizConfig|null;chart_fallback?:boolean;sources:Source|null;conversation_id:string;saved?:boolean;title?:string;parts?:Answer[]};
 type Saved={id:string;conversation_id:string;question:string;created_at:string};
 type Turn={question:string;answer:Answer|null};
-const labels:Record<string,string>={revenue:'Doanh thu',sales_growth:'Tăng trưởng doanh thu',production_output:'Sản lượng',defect_rate:'Tỷ lệ phế phẩm',actual:'Thực tế',forecast:'Dự báo',lower:'Cận dưới (95%)',upper:'Cận trên (95%)',on_time_rate:'Tỷ lệ đúng hạn',territory:'Khu vực',sales_territory:'Khu vực',month:'Tháng',product:'Sản phẩm',factory:'Nhà máy',production_line:'Dây chuyền',category:'Danh mục',reason:'Lý do phế phẩm',ordered_units:'Số lượng đặt',scrapped_units:'Số lượng phế phẩm',day:'Ngày',week:'Tuần',year:'Năm',orders:'Số đơn hàng',period:'Kỳ',sample_count:'Số bản ghi',current_revenue:'Doanh thu kỳ này',previous_revenue:'Doanh thu kỳ trước'};
+const labels:Record<string,string>={revenue:'Doanh thu',sales_growth:'Tăng trưởng doanh thu',production_output:'Sản lượng',defect_rate:'Tỷ lệ phế phẩm',actual:'Thực tế',forecast:'Dự báo',lower:'Cận dưới (95%)',upper:'Cận trên (95%)',on_time_rate:'Tỷ lệ đúng hạn',territory:'Khu vực',sales_territory:'Khu vực',month:'Tháng',product:'Sản phẩm',factory:'Nhà máy',production_line:'Dây chuyền',category:'Danh mục',reason:'Lý do phế phẩm',ordered_units:'Số lượng đặt',scrapped_units:'Số lượng phế phẩm',day:'Ngày',week:'Tuần',year:'Năm',orders:'Số đơn hàng',period:'Kỳ',change_pct:'Thay đổi (%)',change_abs:'Thay đổi',sample_count:'Số bản ghi',current_revenue:'Doanh thu kỳ này',previous_revenue:'Doanh thu kỳ trước'};
 export function Chat({access,enabled,advancedEnabled,anchor,language,role}:{access:string;enabled:boolean;advancedEnabled:boolean;anchor:string;language:'vi'|'en';role:string}){
   const vi=language==='vi';
   const [question,setQuestion]=useState('');
@@ -72,6 +72,8 @@ export function Chat({access,enabled,advancedEnabled,anchor,language,role}:{acce
   function cell(value:unknown,key:string){
     if(value===null||value===undefined)return '—';
     if(['revenue','sales_growth','production_output','defect_rate','on_time_rate','actual','forecast','lower','upper','current_revenue','previous_revenue'].includes(key)&&Number.isFinite(Number(value)))return new Intl.NumberFormat(vi?'vi-VN':'en-US',{style:['defect_rate','sales_growth','on_time_rate'].includes(key)?'percent':'decimal',maximumFractionDigits:2}).format(Number(value));
+    if(key==='change_pct'&&Number.isFinite(Number(value)))return `${Number(value)>0?'+':''}${new Intl.NumberFormat(vi?'vi-VN':'en-US',{maximumFractionDigits:1}).format(Number(value))}%`;
+    if(key==='change_abs'&&Number.isFinite(Number(value)))return new Intl.NumberFormat(vi?'vi-VN':'en-US',{maximumFractionDigits:2,signDisplay:'exceptZero'}).format(Number(value));
     return String(value);
   }
   function block(a:Answer,title?:string){

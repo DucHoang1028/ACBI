@@ -238,6 +238,7 @@ def side_by_side(
     by: str | None,
     who: str,
     language: str,
+    rank_by_change: bool = False,
 ) -> tuple[list[dict[str, Any]], str]:
     """The table and the plain reading for (period label, rows) pairs.
 
@@ -293,10 +294,18 @@ def side_by_side(
         groups.values(), key=lambda r: -(number(r.get(last_label)) or Decimal(0))
     )
     moves = []
+    deltas = []
     for row in table:
         first, last = number(row.get(first_label)), number(row.get(last_label))
+        if first is not None and last is not None:
+            row["change_abs"] = str(last - first)
+            deltas.append((str(row[by]), last - first))
         if first and last is not None:
-            moves.append((str(row[by]), (last - first) / abs(first) * 100))
+            change = (last - first) / abs(first) * 100
+            row["change_pct"] = f"{change:.1f}"
+            moves.append((str(row[by]), change))
+    if rank_by_change:  # "xếp hạng theo tăng trưởng": the table itself is the ranking
+        table.sort(key=lambda r: -Decimal(r.get("change_pct") or "-1e9"))
     lead = table[0]
     lead_value = amount(number(lead.get(last_label)) or Decimal(0), metric, language)
     reading = (
@@ -331,6 +340,23 @@ def side_by_side(
                 if fell
                 else " No group fell."
             )
+        )
+    total_delta = sum((d for _, d in deltas), Decimal(0))
+    if deltas and total_delta != 0:
+        pick = max if total_delta > 0 else min
+        who_moved, moved_by = pick(deltas, key=lambda d: d[1])
+        share = moved_by / total_delta * 100
+        sign = "+" if total_delta > 0 else "-"
+        figure = f"{sign}{amount(abs(total_delta), metric, language)}"
+        part = (
+            f"{'+' if moved_by >= 0 else '-'}{amount(abs(moved_by), metric, language)}"
+        )
+        reading += (
+            f" Tổng thay đổi {figure}; đóng góp nhiều nhất: {who_moved} ({part}, "
+            f"{percent(share, language)} tổng thay đổi)."
+            if vi
+            else f" Total change {figure}; largest contribution: {who_moved} ({part}, "
+            f"{percent(share, language)} of the change)."
         )
     span = f"{first_label} – {last_label}"
     head = (

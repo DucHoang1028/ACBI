@@ -122,6 +122,9 @@ logger = logging.getLogger("acbi.chat")
 BUSY_MESSAGE = "AI service is busy"
 NOTE_STATUSES = {"ok", "no_data", "needs_clarification"}
 MAX_TASKS = 5  # requests answered from one message
+RANKING_WORDS = (
+    r"\b(?:xep hang|rank\w*|tang truong|growth|nhanh nhat|manh nhat|fastest)\b"
+)
 DATA_KINDS = {"metric_query", "comparison", "trend", "ranking", "needs_clarification"}
 
 
@@ -353,16 +356,20 @@ def run_dialogue(
     previous = last_answer(
         latest_in_conversation(state.storage, user["id"], conversation_id, user["role"])
     )
-    text_out = canned or reply_from_metadata(
-        state.llm,
-        body.question,
-        user["role"],
-        mode,
-        anchor.isoformat(),
-        budget,
-        previous,
-        body.language,
-    ) or fallback(mode, body.language, user["role"])
+    text_out = (
+        canned
+        or reply_from_metadata(
+            state.llm,
+            body.question,
+            user["role"],
+            mode,
+            anchor.isoformat(),
+            budget,
+            previous,
+            body.language,
+        )
+        or fallback(mode, body.language, user["role"])
+    )
     status = "needs_clarification" if limitation else "ok"
     save_context(
         state.storage,
@@ -725,6 +732,9 @@ def run_comparison(
         group,
         "" if group else ", ".join(territories + factory_names),
         body.language,
+        bool(
+            re.search(RANKING_WORDS, fold(body.question))
+        ),
     )
     payload = response(
         "ok" if table else "no_data",
@@ -1531,7 +1541,7 @@ def answer_one(
             rows
             and is_share_question(body.question)
             and intent.limit < 100
-            and intent.dimension in GROUP_COLUMN
+            and intent.dimension in {*GROUP_COLUMN, "product"}
             and plan.metric_id in {"revenue", "production_output"}
         ):
             # "Top 3 ... chiếm bao nhiêu phần trăm": against the whole, not the top 3.

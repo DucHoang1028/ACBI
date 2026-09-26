@@ -301,15 +301,16 @@ def compares_two_periods(question: str) -> bool:
     value = fold(question)
     is_range = (
         re.search(r"\b(?:tu|from)\b.*\b(?:den|to)\b", value)
-        or re.search(r"\b(?:den|until|through)\b", value)
+        or re.search(r"\b(?:den|until|through|sang)\b", value)
         or re.search(r"\d{4}-\d{2}-\d{2}", value)
     )
     periods = named_periods(question)
     if is_range:
         # "Tăng trưởng từ 2023 đến 2024": two consecutive years, quarters or months
         # named with a change word are the two ends to compare, not a span to sum.
+        change = r"\b(?:tang|giam|dong gop|thay doi|increase|decrease|contribut\w*)\b"
         return (
-            bool(re.search(COMPARE_WORDS, value))
+            bool(re.search(COMPARE_WORDS, value) or re.search(change, value))
             and len(periods) == 2
             and periods[0][2] == periods[1][1]
         )
