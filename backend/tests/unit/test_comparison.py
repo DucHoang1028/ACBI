@@ -676,3 +676,20 @@ def test_compare_with_the_year_before_in_english() -> None:
     pair = shift_pair("compare with the year before", year, anchor)
     assert [(s.year, e.year) for _, s, e in pair] == [(2023, 2024), (2024, 2025)]
     assert shift_pair("compare with 2023", year, anchor) == []
+
+
+def test_whole_calendar_windows_keep_their_plain_labels() -> None:
+    from datetime import date
+
+    from app.query.comparison import kind_of, label, shift_pair
+
+    assert kind_of(date(2024, 1, 1), date(2025, 1, 1)) == "year"
+    assert kind_of(date(2024, 4, 1), date(2024, 7, 1)) == "quarter"
+    assert kind_of(date(2024, 2, 1), date(2024, 3, 1)) == "month"
+    assert kind_of(date(2025, 1, 1), date(2025, 6, 30)) == "range"
+    pair = shift_pair(
+        "compare with the year before",
+        {"period": "explicit", "start_date": "2024-01-01", "end_date": "2025-01-01"},
+        date(2025, 6, 29),
+    )
+    assert [label(p, "vi") for p in pair] == ["Năm 2023", "Năm 2024"]

@@ -46,6 +46,25 @@ def adjacent(periods: list[Period]) -> bool:
     return all(a[2] == b[1] for a, b in zip(periods, periods[1:]))
 
 
+def kind_of(start: date, end: date) -> str:
+    """ "year", "quarter" or "month" for a whole calendar unit, else "range"."""
+    if start.day == 1:
+        if start.month == 1 and end == date(start.year + 1, 1, 1):
+            return "year"
+        if start.month in (1, 4, 7, 10) and end == month_start(start, 3):
+            return "quarter"
+        if end == month_start(start, 1):
+            return "month"
+    return "range"
+
+
+def _uniform(pair: list[Period]) -> list[Period]:
+    """Two windows of different kinds are labelled as plain ranges."""
+    if len({p[0] for p in pair}) > 1:
+        return [("range", p[1], p[2]) for p in pair]
+    return pair
+
+
 def with_earlier_period(named: list[Period], slots: dict[str, Any]) -> list[Period]:
     """ "So sánh với 2023" after a 2024 answer: the period shown and the one named.
 
@@ -87,8 +106,14 @@ def shift_pair(question: str, slots: dict[str, Any], anchor: date) -> list[Perio
             start, end = resolve_period(str(slots["period"]), anchor)
     except (KeyError, ValueError):
         return []
-    return sorted(
-        [("range", moved[0], moved[1]), ("range", start, end)], key=lambda p: p[1]
+    return _uniform(
+        sorted(
+            [
+                (kind_of(*moved), moved[0], moved[1]),
+                (kind_of(start, end), start, end),
+            ],
+            key=lambda p: p[1],
+        )
     )
 
 
@@ -127,9 +152,14 @@ def relative_pair(question: str, slots: dict[str, Any], anchor: date) -> list[Pe
         return []
     if named_end <= named_start:
         return []
-    return sorted(
-        [("range", named_start, named_end), ("range", start, end)],
-        key=lambda p: p[1],
+    return _uniform(
+        sorted(
+            [
+                (kind_of(named_start, named_end), named_start, named_end),
+                (kind_of(start, end), start, end),
+            ],
+            key=lambda p: p[1],
+        )
     )
 
 
