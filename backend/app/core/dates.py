@@ -326,6 +326,13 @@ BEFORE_THAT = (
 )
 
 
+EN_BEFORE = (
+    r"\b(?:the (?P<a>year|quarter|month|week|period) before|"
+    r"previous (?P<b>year|quarter|month|week|period))\b"
+)
+EN_UNITS = {"year": "nam", "quarter": "quy", "month": "thang", "week": "tuan"}
+
+
 def _minus_year(day: date) -> date:
     try:
         return day.replace(year=day.year - 1)
@@ -343,7 +350,8 @@ def shifted_period(
     value = fold(question)
     year_ago = re.search(YEAR_AGO, value)
     before = re.search(BEFORE_THAT, value)
-    if not (year_ago or before):
+    english = re.search(EN_BEFORE, value)
+    if not (year_ago or before or english):
         return None
     try:
         if slots.get("period") == "explicit":
@@ -355,8 +363,12 @@ def shifted_period(
         return None
     if year_ago:
         return _minus_year(start), _minus_year(end)
-    assert before is not None
-    unit = before.groupdict().get("unit")
+    if english:
+        word = english.group("a") or english.group("b")
+        unit = EN_UNITS.get(word)
+    else:
+        assert before is not None
+        unit = before.groupdict().get("unit")
     if unit == "quy":
         return month_start(start, -3), start
     if unit == "thang":
@@ -378,7 +390,11 @@ def shifted_period(
 def moves_period(question: str) -> bool:
     """True for "cùng kỳ năm trước" or "kỳ trước đó": it says something on its own."""
     value = fold(question)
-    return bool(re.search(YEAR_AGO, value) or re.search(BEFORE_THAT, value))
+    return bool(
+        re.search(YEAR_AGO, value)
+        or re.search(BEFORE_THAT, value)
+        or re.search(EN_BEFORE, value)
+    )
 
 
 def resolve_period(name: str, anchor: date) -> tuple[date, date]:

@@ -658,3 +658,21 @@ def test_last_year_after_a_full_earlier_year_compares_two_whole_years() -> None:
         date(2025, 6, 29),
     )
     assert [(s.year, e.year) for _, s, e in pair] == [(2023, 2024), (2024, 2025)]
+
+
+def test_compare_with_the_year_before_in_english() -> None:
+    from datetime import date
+
+    from app.core.dates import moves_period, shifted_period
+    from app.query.comparison import shift_pair
+
+    anchor = date(2025, 6, 29)
+    year = {"period": "explicit", "start_date": "2024-01-01", "end_date": "2025-01-01"}
+    assert moves_period("compare with the year before")
+    assert shifted_period("and the quarter before?", year, anchor) == (
+        date(2023, 10, 1),
+        date(2024, 1, 1),
+    )
+    pair = shift_pair("compare with the year before", year, anchor)
+    assert [(s.year, e.year) for _, s, e in pair] == [(2023, 2024), (2024, 2025)]
+    assert shift_pair("compare with 2023", year, anchor) == []

@@ -93,6 +93,7 @@ from app.query.comparison import (
     adjacent,
     label,
     relative_pair,
+    shift_pair,
     side_by_side,
     with_earlier_period,
 )
@@ -1239,9 +1240,11 @@ def answer_one(
         if not periods and re.search(COMPARE_WORDS, fold(body.question)):
             # "So sánh với 2023" after a 2024 answer: the period on screen and 2023.
             slots = (prior or {}).get("slots") or {}
-            periods = with_earlier_period(
-                named_periods(body.question), slots
-            ) or relative_pair(body.question, slots, anchor)
+            periods = (
+                with_earlier_period(named_periods(body.question), slots)
+                or relative_pair(body.question, slots, anchor)
+                or shift_pair(body.question, slots, anchor)
+            )
         if len(periods) >= 2:
             if intent.dimension in {"month", "day", "week"} and (
                 single_dimension(fold(body.question)) != intent.dimension

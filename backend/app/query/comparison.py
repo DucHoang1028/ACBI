@@ -7,7 +7,13 @@ from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from app.core.dates import Period, date_hints, month_start, resolve_period
+from app.core.dates import (
+    Period,
+    date_hints,
+    month_start,
+    resolve_period,
+    shifted_period,
+)
 from app.metadata import vocabulary
 from app.presentation.analysis import amount, percent
 
@@ -66,6 +72,24 @@ def with_earlier_period(named: list[Period], slots: dict[str, Any]) -> list[Peri
     if kind != named[0][0] or named[0][1] == start:
         return []
     return sorted([named[0], (kind, start, end)], key=lambda p: p[1])
+
+
+def shift_pair(question: str, slots: dict[str, Any], anchor: date) -> list[Period]:
+    """ "Compare with the year before": the period on screen and the one it moves to."""
+    moved = shifted_period(question, slots, anchor)
+    if moved is None:
+        return []
+    try:
+        if slots.get("period") == "explicit":
+            start = date.fromisoformat(str(slots["start_date"]))
+            end = date.fromisoformat(str(slots["end_date"]))
+        else:
+            start, end = resolve_period(str(slots["period"]), anchor)
+    except (KeyError, ValueError):
+        return []
+    return sorted(
+        [("range", moved[0], moved[1]), ("range", start, end)], key=lambda p: p[1]
+    )
 
 
 def relative_pair(question: str, slots: dict[str, Any], anchor: date) -> list[Period]:
