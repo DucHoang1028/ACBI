@@ -306,7 +306,7 @@ def side_by_side(
             moves.append((str(row[by]), change))
     if rank_by_change:  # "xếp hạng theo tăng trưởng": the table itself is the ranking
         table.sort(key=lambda r: -Decimal(r.get("change_pct") or "-1e9"))
-    lead = table[0]
+    lead = max(table, key=lambda r: number(r.get(last_label)) or Decimal(0))
     lead_value = amount(number(lead.get(last_label)) or Decimal(0), metric, language)
     reading = (
         f" Đứng đầu {last_label}: {lead[by]} ({lead_value})."

@@ -790,3 +790,38 @@ def test_from_one_year_to_the_next_with_sang_and_a_change_word_compares() -> Non
         "Khu vực nào đóng góp nhiều nhất vào mức tăng doanh thu từ 2023 sang 2024?"
     )
     assert not compares_two_periods("Doanh thu từ 2022 sang 2025")
+
+
+def test_what_ifs_and_multiples_are_refused_as_one_request() -> None:
+    from app.conversation.intent import is_scenario, local_unsupported
+
+    for asked in (
+        "Nếu doanh thu tăng 10% thì năm 2025 sẽ là bao nhiêu?",
+        "Gấp đôi doanh thu 2023 là bao nhiêu và 2024 có đạt không?",
+        "Giả sử sản lượng giảm 5% thì sao",
+    ):
+        assert is_scenario(asked), asked
+        found = local_unsupported(asked)
+        assert found is not None and found.intent_type == "unsupported", asked
+    for fine in (
+        "Canada gấp mấy lần Australia về doanh thu?",
+        "Doanh thu tăng bao nhiêu",
+    ):
+        assert not is_scenario(fine), fine
+
+
+def test_the_leader_is_the_top_value_even_when_the_table_is_ranked_by_change() -> None:
+    from app.query.comparison import side_by_side
+
+    rows = [
+        (
+            "Năm 2023",
+            [{"territory": "A", "revenue": "100"}, {"territory": "B", "revenue": "10"}],
+        ),
+        (
+            "Năm 2024",
+            [{"territory": "A", "revenue": "120"}, {"territory": "B", "revenue": "40"}],
+        ),
+    ]
+    _, text = side_by_side("revenue", rows, "territory", "", "vi", rank_by_change=True)
+    assert "Đứng đầu Năm 2024: A" in text

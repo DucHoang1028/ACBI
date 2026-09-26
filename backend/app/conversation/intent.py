@@ -649,11 +649,21 @@ UNSUPPORTED_ALWAYS = re.compile(
     r"\b(?:theo|by|per|moi|tung|each)\s+(?:khach hang|customers?|nhan vien|"
     r"employees?|nha cung cap|suppliers?)\b"
 )
+SCENARIO = re.compile(
+    r"\bneu\b.*\bthi\b|\bgia su\b|\bwhat if\b|\bsuppose\b|\bassuming\b|"
+    r"\b(?:gap doi|nhan doi|gap \d+ lan|nhan \d+ lan|double|twice|triple)\b|"
+    r"\b(?:tang|giam) \d+(?:[.,]\d+)?\s*%"
+)
 UNSUPPORTED_TOPICS = re.compile(
     r"\b(?:loi nhuan|profit|margin|khach hang|customers?|nhan vien|employees?|staff|"
     r"tien luong|bang luong|muc luong|salary|payroll|ton kho|inventory|stock|chi phi|"
     r"costs?|gia von|nha cung cap|suppliers?)\b"
 )
+
+
+def is_scenario(question: str) -> bool:
+    """A what-if or a multiple ("nếu tăng 10% thì", "gấp đôi"): not stored data."""
+    return bool(SCENARIO.search(fold(question)))
 
 
 def local_unsupported(question: str) -> Intent | None:
@@ -666,6 +676,7 @@ def local_unsupported(question: str) -> Intent | None:
     if not (
         (re.search(WHY, value) and not vocabulary.get().match_metrics(value))
         or UNSUPPORTED_ALWAYS.search(value)
+        or SCENARIO.search(value)
         or (
             UNSUPPORTED_TOPICS.search(value)
             and not vocabulary.get().match_metrics(value)

@@ -72,6 +72,7 @@ export function Chat({access,enabled,advancedEnabled,anchor,language,role}:{acce
   function cell(value:unknown,key:string){
     if(value===null||value===undefined)return '—';
     if(['revenue','sales_growth','production_output','defect_rate','on_time_rate','actual','forecast','lower','upper','current_revenue','previous_revenue'].includes(key)&&Number.isFinite(Number(value)))return new Intl.NumberFormat(vi?'vi-VN':'en-US',{style:['defect_rate','sales_growth','on_time_rate'].includes(key)?'percent':'decimal',maximumFractionDigits:2}).format(Number(value));
+    if(/^(Năm |Quý |Tháng |Year |Q\d |\d{2}\/\d{2}\/\d{4})/.test(key)&&value!==''&&Number.isFinite(Number(value)))return Math.abs(Number(value))<1?new Intl.NumberFormat(vi?'vi-VN':'en-US',{style:'percent',maximumFractionDigits:2}).format(Number(value)):new Intl.NumberFormat(vi?'vi-VN':'en-US',{maximumFractionDigits:2}).format(Number(value));
     if(key==='change_pct'&&Number.isFinite(Number(value)))return `${Number(value)>0?'+':''}${new Intl.NumberFormat(vi?'vi-VN':'en-US',{maximumFractionDigits:1}).format(Number(value))}%`;
     if(key==='change_abs'&&Number.isFinite(Number(value)))return new Intl.NumberFormat(vi?'vi-VN':'en-US',{maximumFractionDigits:2,signDisplay:'exceptZero'}).format(Number(value));
     return String(value);

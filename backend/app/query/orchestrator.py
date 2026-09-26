@@ -32,6 +32,7 @@ from app.conversation.intent import (
     first_metric,
     first_task_text,
     follow_up_intent,
+    is_scenario,
     local_comparison_intent,
     local_intent,
     local_unsupported,
@@ -1052,7 +1053,8 @@ def answer_one(
         # A message with several requests: the model reads the first one only.
         if not later:
             asked = resolve_corrections(asked)
-        tasks = [asked] if later else split_tasks(asked)
+        scenario = is_scenario(asked)  # its parts depend on each other: one request
+        tasks = [asked] if later or scenario else split_tasks(asked)
         first = tasks[0]
         canned = (
             None
