@@ -365,7 +365,20 @@ def shifted_period(
         return date(start.year - 1, start.month, start.day), start
     if unit == "tuan":
         return start - timedelta(days=7), start
+    if start.day == 1:  # the same calendar unit again, when the window is one
+        if end == month_start(start, 1):
+            return month_start(start, -1), start
+        if end == month_start(start, 3) and start.month in (1, 4, 7, 10):
+            return month_start(start, -3), start
+        if end == date(start.year + 1, 1, 1) and start.month == 1:
+            return date(start.year - 1, 1, 1), start
     return start - (end - start), start
+
+
+def moves_period(question: str) -> bool:
+    """True for "cùng kỳ năm trước" or "kỳ trước đó": it says something on its own."""
+    value = fold(question)
+    return bool(re.search(YEAR_AGO, value) or re.search(BEFORE_THAT, value))
 
 
 def resolve_period(name: str, anchor: date) -> tuple[date, date]:

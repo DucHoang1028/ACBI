@@ -571,3 +571,30 @@ def test_a_metric_switch_follow_up_can_be_read_without_a_model() -> None:
     slots = {"metric_id": "revenue", "period": "explicit"}
     assert follow_up_intent("còn tỷ lệ phế phẩm?", slots) is not None
     assert follow_up_intent("tỷ lệ phế phẩm năm 2024 theo lý do", slots) is None
+
+
+def test_the_period_before_keeps_the_calendar_unit_and_stands_alone() -> None:
+    from datetime import date
+
+    from app.ai.client import Intent
+    from app.conversation.intent import merged_intent
+    from app.core.dates import moves_period, shifted_period
+
+    anchor = date(2025, 6, 29)
+    q1 = {"period": "explicit", "start_date": "2024-01-01", "end_date": "2024-04-01"}
+    assert shifted_period("kỳ trước đó", q1, anchor) == (
+        date(2023, 10, 1),
+        date(2024, 1, 1),
+    )
+    assert moves_period("cùng kỳ năm trước") and not moves_period("doanh thu năm 2024")
+    blank = Intent.model_validate(
+        {
+            "metric_id": None, "dimension": "none", "period": None, "start_date": None,
+            "end_date": None, "factory_id": None, "territory": None, "limit": 100,
+            "needs_clarification": False, "clarification_question": None,
+            "zero_scrap_only": False,
+        }
+    )  # fmt: skip
+    prior = {"slots": {"metric_id": "revenue", "dimension": "none", **q1, "limit": 100}}
+    merged = merged_intent(blank, prior, "kỳ trước đó")
+    assert merged.metric_id == "revenue" and not merged.needs_clarification

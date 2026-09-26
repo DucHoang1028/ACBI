@@ -21,6 +21,7 @@ from app.core.dates import (
     compares_two_periods,
     intent_hints,
     is_confirmation,
+    moves_period,
     named_periods,
     single_dimension,
     territory_names,
@@ -85,6 +86,7 @@ def says_something(
         or re.search(FOLLOW_UP, value)
         or re.search(RANKING, value)
         or re.search(GROWTH, value)
+        or moves_period(question)
         or vocab.match_metrics(value)
         or vocab.match_members(value)
         or vocab.match_dimensions(value)
@@ -286,6 +288,7 @@ def merged_intent(
         or intent.period
         or intent.dimension != "none"
         or intent.limit != 100  # "top 3"
+        or moves_period(question)
         or current["dimension"] != "none"  # "theo khu vực" read from the wording
         or intent.territory
         or intent.factory_id is not None
