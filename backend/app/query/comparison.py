@@ -140,8 +140,9 @@ def year_over_year(
         return []
     try:
         if period == "explicit":
-            start, end = date.fromisoformat(str(start_date)), date.fromisoformat(
-                str(end_date)
+            start, end = (
+                date.fromisoformat(str(start_date)),
+                date.fromisoformat(str(end_date)),
             )
         else:
             start, end = resolve_period(period or "last_year", anchor)
@@ -154,6 +155,22 @@ def year_over_year(
             key=lambda p: p[1],
         )
     )
+
+
+TOP_N = (
+    r"\btop\s*(\d{1,2})\b|\b(\d{1,2})\s+(?:khu vuc|nuoc|nha may|san pham|danh muc|nhom|"
+    r"dong|day chuyen)\s+(?:lon nhat|hang dau|dung dau|cao nhat)\b|"
+    r"\b(?:top|largest|biggest)\s+(\d{1,2})\b"
+)
+
+
+def top_n(question: str) -> int | None:
+    """ "3 khu vực lớn nhất" or "top 5": how many of the biggest to keep."""
+    found = re.search(TOP_N, fold(question))
+    if not found:
+        return None
+    number_ = next((g for g in found.groups() if g), None)
+    return int(number_) if number_ else None
 
 
 def relative_pair(question: str, slots: dict[str, Any], anchor: date) -> list[Period]:
@@ -219,8 +236,9 @@ def change_text(
     """ "up 12.3%" for amounts, "up 1.2 percentage points" for ratios."""
     vi = language == "vi"
     if metric in vocabulary.get().ratio_metrics():
-        moved, unit = (last - first) * 100, (
-            "điểm phần trăm" if vi else "percentage points"
+        moved, unit = (
+            (last - first) * 100,
+            ("điểm phần trăm" if vi else "percentage points"),
         )
         amount_text = f"{abs(moved):.1f} {unit}"
     elif first != 0:
@@ -239,6 +257,7 @@ def side_by_side(
     who: str,
     language: str,
     rank_by_change: bool = False,
+    top: int | None = None,
 ) -> tuple[list[dict[str, Any]], str]:
     """The table and the plain reading for (period label, rows) pairs.
 
@@ -293,6 +312,8 @@ def side_by_side(
     table = sorted(
         groups.values(), key=lambda r: -(number(r.get(last_label)) or Decimal(0))
     )
+    if top:  # "trong 3 khu vực lớn nhất": only those, ranked by the latest value
+        table = table[:top]
     moves = []
     deltas = []
     for row in table:

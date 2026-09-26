@@ -898,6 +898,7 @@ def split_tasks(question: str) -> list[str]:
             first = found
             break
     first_owns_period = bool(re.search(OWN_PERIOD, parts[0]))
+    first_names_metric = bool(vocab.match_metrics(parts[0]))
     first_compares = bool(re.search(COMPARE_WORDS, parts[0]))
     tasks: list[str] = []
     for index, (part, original) in enumerate(zip(parts, originals)):
@@ -918,7 +919,13 @@ def split_tasks(question: str) -> list[str]:
                 or (re.search(RANK_WORDS, part) and own_period)
                 or (re.match(IMPERATIVE, part) and (found or own_period))
                 or (found and found != first)
-                or (found and own_period and first_owns_period and not first_compares)
+                or (
+                found
+                and own_period
+                and first_owns_period
+                and first_names_metric
+                and not first_compares
+            )
             )
         )
         if starts or not tasks:

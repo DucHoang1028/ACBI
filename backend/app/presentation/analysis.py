@@ -4,7 +4,9 @@ Every figure is computed from the rows the query returned, never supplied by a
 model, so a sentence here can always be checked against the table beside it.
 """
 
+import calendar
 import re
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -14,6 +16,7 @@ from app.metadata import vocabulary
 from app.presentation.charts import describe, number
 
 HIDDEN = {"sample_count", "ordered_units", "scrapped_units"}
+ANCHOR: date | None = None  # the data's last day, set at startup
 
 WHICH = r"\b(?:cai nao|ben nao|nuoc nao|khu vuc nao|thang nao|nam nao|nhom nao|which)\b"
 KINDS = {
@@ -43,8 +46,44 @@ def analysis_kind(question: str) -> str | None:
     return "higher" if re.search(WHICH, value) else None
 
 
+RATIO = r"\b(?:bao nhieu lan|gap may lan|gap bao nhieu|how many times|times as)\b"
+
+
+def ratio_text(
+    rows: list[dict[str, Any]], metric: str, question: str, language: str
+) -> str | None:
+    """ "Bikes so với Accessories là bao nhiêu lần": the first named over the second."""
+    value = fold(question)
+    if not re.search(RATIO, value):
+        return None
+    cols = columns(rows, metric)
+    if cols is None:
+        return None
+    label, number_col = cols
+    at = []
+    for row in rows:
+        name = str(row[label])
+        found = re.search(r"(?<![\w])" + re.escape(fold(name)) + r"(?![\w])", value)
+        if found and (n := number(row.get(number_col))) is not None:
+            at.append((found.start(), name, n))
+    at.sort()
+    if len(at) != 2 or at[1][2] == 0:
+        return None
+    (_, first, a), (_, second, b) = at
+    times = f"{a / b:,.1f}".replace(",", "_").replace(".", ",").replace("_", ".")
+    if language != "vi":
+        times = f"{a / b:,.1f}"
+    return (
+        f"{first} gấp {times} lần {second} ({amount(a, metric, language)} so với "
+        f"{amount(b, metric, language)})."
+        if language == "vi"
+        else f"{first} is {times} times {second} ({amount(a, metric, language)} vs "
+        f"{amount(b, metric, language)})."
+    )
+
+
 def names_new_member(question: str, rows: list[dict[str, Any]]) -> bool:
-    """"So với Úc thì ai cao hơn?" names a member the result on screen lacks."""
+    """ "So với Úc thì ai cao hơn?" names a member the result on screen lacks."""
     shown = {fold(str(v)) for row in rows for v in row.values()}
     for names in vocabulary.get().match_members(fold(question)).values():
         if any(fold(name) not in shown for name in names):
@@ -309,7 +348,23 @@ def highlights(metric: str, rows: list[dict[str, Any]], language: str) -> str | 
         ordered = [
             (str(r[label]), n) for r in rows if (n := number(r.get(value))) is not None
         ]
+        unfinished = ""
+        if ANCHOR and label == "month" and len(ordered) > 2:
+            end_month = date.fromisoformat(ordered[-1][0][:10])
+            last_day = calendar.monthrange(end_month.year, end_month.month)[1]
+            if (end_month.year, end_month.month) == (ANCHOR.year, ANCHOR.month) and (
+                ANCHOR.day < last_day
+            ):
+                # The data stops mid-month: that month is not a point on the trend.
+                unfinished = label_text(label, ordered[-1][0], language)
+                ordered = ordered[:-1]
         first, last = ordered[0], ordered[-1]
+        if unfinished:
+            text += (
+                f" ({unfinished} chưa đủ tháng nên không tính vào xu hướng.)"
+                if vi
+                else f" ({unfinished} is not a full month, so it is not in the trend.)"
+            )
         if first[1] != 0:
             change = (last[1] - first[1]) / abs(first[1]) * 100
             word = ("tăng", "increased") if change >= 0 else ("giảm", "decreased")

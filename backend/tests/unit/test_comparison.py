@@ -825,3 +825,67 @@ def test_the_leader_is_the_top_value_even_when_the_table_is_ranked_by_change() -
     ]
     _, text = side_by_side("revenue", rows, "territory", "", "vi", rank_by_change=True)
     assert "Đứng đầu Năm 2024: A" in text
+
+
+def test_a_month_the_data_stops_inside_is_left_out_of_the_trend() -> None:
+    from datetime import date
+
+    from app.presentation import analysis
+
+    rows = [
+        {"month": "2025-04-01", "revenue": "100"},
+        {"month": "2025-05-01", "revenue": "110"},
+        {"month": "2025-06-01", "revenue": "5"},
+    ]
+    analysis.ANCHOR = date(2025, 6, 29)
+    try:
+        text = analysis.highlights("revenue", rows, "vi")
+    finally:
+        analysis.ANCHOR = None
+    assert text is not None and "chưa đủ tháng" in text and "tăng 10,0%" in text
+
+
+def test_a_leading_clause_without_a_metric_does_not_split_the_question() -> None:
+    from app.conversation.intent import split_tasks
+
+    question = (
+        "Trong 3 khu vực lớn nhất năm 2024, khu vực nào tăng trưởng "
+        "chậm nhất so với 2023?"
+    )
+    assert split_tasks(question) == [question]
+
+
+def test_the_three_largest_are_kept_and_a_ratio_is_stated() -> None:
+    from app.presentation.analysis import ratio_text
+    from app.query.comparison import side_by_side, top_n
+
+    assert top_n("Trong 3 khu vực lớn nhất năm 2024") == 3
+    assert top_n("top 5 sản phẩm") == 5 and top_n("doanh thu năm 2024") is None
+    rows = [
+        (
+            "Năm 2023",
+            [
+                {"territory": t, "revenue": v}
+                for t, v in (("A", "100"), ("B", "50"), ("C", "10"))
+            ],
+        ),
+        (
+            "Năm 2024",
+            [
+                {"territory": t, "revenue": v}
+                for t, v in (("A", "120"), ("B", "40"), ("C", "90"))
+            ],
+        ),
+    ]
+    table, _ = side_by_side("revenue", rows, "territory", "", "vi", top=2)
+    assert [r["territory"] for r in table] == ["A", "C"]
+    said = ratio_text(
+        [
+            {"category": "Bikes", "revenue": "300"},
+            {"category": "Accessories", "revenue": "6"},
+        ],
+        "revenue",
+        "Doanh thu của Bikes so với Accessories là bao nhiêu lần?",
+        "vi",
+    )
+    assert said is not None and said.startswith("Bikes gấp 50,0 lần Accessories")

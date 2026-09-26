@@ -4,6 +4,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ from app.metadata.dictionary import approved_metrics, load_dictionary
 from app.metadata.retrieval import BM25Retriever
 from app.metadata.vocabulary import Vocabulary, load_members
 from app.metadata.vocabulary import install as install_vocabulary
+from app.presentation import analysis
 
 logger = logging.getLogger("acbi.startup")
 
@@ -79,6 +81,7 @@ def startup(app: FastAPI) -> None:
         app.state.llm = GroqClient(settings) if settings.has_llm_keys() else None
         app.state.stt = GroqSTT(settings) if settings.groq_keys() else None
         app.state.dictionary = dictionary
+        analysis.ANCHOR = date.fromisoformat(anchor["data_as_of"])
         app.state.readiness = {
             "phase": 4,
             "status": "phase_4",

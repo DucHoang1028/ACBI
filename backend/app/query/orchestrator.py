@@ -76,6 +76,7 @@ from app.presentation.analysis import (
     analysis_kind,
     analyze,
     fresh_request,
+    ratio_text,
 )
 from app.presentation.charts import TABLE, VizConfig, validate_viz
 from app.presentation.contract import AskRequest, response
@@ -101,6 +102,7 @@ from app.query.comparison import (
     relative_pair,
     shift_pair,
     side_by_side,
+    top_n,
     with_earlier_period,
     year_over_year,
 )
@@ -733,9 +735,8 @@ def run_comparison(
         group,
         "" if group else ", ".join(territories + factory_names),
         body.language,
-        bool(
-            re.search(RANKING_WORDS, fold(body.question))
-        ),
+        bool(re.search(RANKING_WORDS, fold(body.question))),
+        top_n(body.question),
     )
     payload = response(
         "ok" if table else "no_data",
@@ -1580,6 +1581,7 @@ def answer_one(
                     and plan.metric_id == "revenue"
                     and share_text(rows, share_of, plan.start, plan.end, body.language)
                 )
+                or ratio_text(rows, plan.metric_id, body.question, body.language)
                 or (
                     whole is not None
                     and top_share_text(
