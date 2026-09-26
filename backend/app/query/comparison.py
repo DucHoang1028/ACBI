@@ -88,14 +88,21 @@ def relative_pair(question: str, slots: dict[str, Any], anchor: date) -> list[Pe
     named_start, named_end = resolve_period(name, anchor)
     if (named_start, named_end) == (start, end):
         return []
-    if name == "last_year":  # the same calendar stretch, not the same number of days
-        try:
-            same_stretch = end.replace(year=end.year - 1)
-        except ValueError:  # 29 February
-            same_stretch = end.replace(year=end.year - 1, day=28)
-        named_end = min(named_end, same_stretch)
-    else:
-        named_end = min(named_end, named_start + (end - start))
+    if named_end <= start and (named_end - named_start) > (end - start):
+        # The named window lies before the one on screen and is longer (a whole last
+        # year against this year so far): cut it to the same stretch.
+        if name == "last_year":  # the same calendar stretch, not the same days
+            try:
+                same_stretch = end.replace(year=end.year - 1)
+            except ValueError:  # 29 February
+                same_stretch = end.replace(year=end.year - 1, day=28)
+            named_end = min(named_end, same_stretch)
+        else:
+            named_end = min(named_end, named_start + (end - start))
+    if named_end > start and named_start < end:  # overlap says nothing about change
+        return []
+    if named_end <= named_start:
+        return []
     return sorted(
         [("range", named_start, named_end), ("range", start, end)],
         key=lambda p: p[1],

@@ -632,3 +632,29 @@ def test_a_metric_switch_drops_a_territory_the_question_never_names() -> None:
     assert resolved.territory is None  # copied from a revenue answer, named nowhere
     named = merged_intent(raw, None, "sản lượng Factory A của Canada")
     assert named.territory == "Canada|France" or named.territory is not None
+
+
+def test_overlapping_windows_are_not_compared() -> None:
+    from datetime import date
+
+    from app.query.comparison import relative_pair
+
+    half_year = {
+        "period": "explicit",
+        "start_date": "2025-01-01",
+        "end_date": "2025-06-30",
+    }
+    assert relative_pair("so sánh với quý trước", half_year, date(2025, 6, 29)) == []
+
+
+def test_last_year_after_a_full_earlier_year_compares_two_whole_years() -> None:
+    from datetime import date
+
+    from app.query.comparison import relative_pair
+
+    pair = relative_pair(
+        "so sánh với năm ngoái",
+        {"period": "explicit", "start_date": "2023-01-01", "end_date": "2024-01-01"},
+        date(2025, 6, 29),
+    )
+    assert [(s.year, e.year) for _, s, e in pair] == [(2023, 2024), (2024, 2025)]
