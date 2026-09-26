@@ -693,3 +693,63 @@ def test_whole_calendar_windows_keep_their_plain_labels() -> None:
         date(2025, 6, 29),
     )
     assert [label(p, "vi") for p in pair] == ["Năm 2023", "Năm 2024"]
+
+
+def test_growth_from_one_year_to_the_next_compares_the_two_ends() -> None:
+    from app.core.dates import compares_two_periods
+
+    assert compares_two_periods("Danh mục nào tăng trưởng mạnh nhất từ 2023 đến 2024?")
+    assert not compares_two_periods(
+        "Doanh thu từ năm 2022 đến 2025 tăng trưởng thế nào"
+    )
+    assert not compares_two_periods("Doanh thu từ tháng 1 đến tháng 2 năm 2025")
+
+
+def test_year_over_year_sets_the_window_against_the_same_window_a_year_earlier() -> (
+    None
+):
+    from datetime import date
+
+    from app.query.comparison import label, year_over_year
+
+    pair = year_over_year(
+        "Khu vực nào có doanh thu giảm so với năm trước?",
+        "last_year",
+        None,
+        None,
+        date(2025, 6, 29),
+    )
+    assert [label(p, "vi") for p in pair] == ["Năm 2023", "Năm 2024"]
+    assert (
+        year_over_year("doanh thu năm 2024", None, None, None, date(2025, 6, 29)) == []
+    )
+
+
+def test_the_pivot_names_the_groups_that_fell() -> None:
+    from app.query.comparison import side_by_side
+
+    rows = [
+        (
+            "Năm 2023",
+            [{"territory": "A", "revenue": "100"}, {"territory": "B", "revenue": "50"}],
+        ),
+        (
+            "Năm 2024",
+            [{"territory": "A", "revenue": "80"}, {"territory": "B", "revenue": "70"}],
+        ),
+    ]
+    _, text = side_by_side("revenue", rows, "territory", "", "vi")
+    assert "Giảm: A (-20,0%)" in text
+
+
+def test_a_top_n_share_is_measured_against_the_whole() -> None:
+    from datetime import date
+    from decimal import Decimal
+
+    from app.presentation.summary import top_share_text
+
+    rows = [{"territory": "A", "revenue": "30"}, {"territory": "B", "revenue": "20"}]
+    text = top_share_text(
+        "revenue", rows, Decimal(100), date(2024, 1, 1), date(2025, 1, 1), "vi"
+    )
+    assert text is not None and "chiếm 50,0%" in text and "A 30,0%" in text

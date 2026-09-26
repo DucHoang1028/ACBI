@@ -6,7 +6,14 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.metadata import vocabulary
-from app.presentation.analysis import highlights, money, percent
+from app.presentation.analysis import (
+    columns,
+    highlights,
+    label_text,
+    money,
+    percent,
+    ranked,
+)
 
 
 def named(row: dict[str, Any], metric_id: str) -> str:
@@ -83,6 +90,42 @@ def factual(
     head = f"{label} ({scope})" if scope else label
     return f"{head} for {period}: {len(rows)} groups. " + (
         highlights(metric_id, rows, "en") or "Values are in the table."
+    )
+
+
+def top_share_text(
+    metric_id: str,
+    rows: list[dict[str, Any]],
+    total: Decimal,
+    start: date,
+    end: date,
+    language: str,
+) -> str | None:
+    """The cut-down list's share of the whole, from the rows and one total query."""
+    cols = columns(rows, metric_id)
+    if cols is None or total <= 0:
+        return None
+    label, value = cols
+    pairs = ranked(rows, label, value)
+    if not pairs:
+        return None
+    subtotal = sum((v for _, v in pairs), Decimal(0))
+    name = vocabulary.get().metric_label(metric_id, language).lower()
+    each = ", ".join(
+        f"{label_text(label, k, language)} {percent(v / total * 100, language)}"
+        for k, v in pairs
+    )
+    period = f"{start:%d/%m/%Y} – {(end - timedelta(days=1)):%d/%m/%Y}"
+    if language == "vi":
+        return (
+            f"{len(pairs)} nhóm đứng đầu cộng lại {money(subtotal, 'vi')}, chiếm "
+            f"{percent(subtotal / total * 100, 'vi')} tổng {name} {money(total, 'vi')} "
+            f"({period}). Từng nhóm: {each}."
+        )
+    return (
+        f"The top {len(pairs)} add up to {money(subtotal, 'en')}, "
+        f"{percent(subtotal / total * 100, 'en')} of the {money(total, 'en')} total "
+        f"{name} ({period}). Each: {each}."
     )
 
 

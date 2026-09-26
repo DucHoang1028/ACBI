@@ -304,11 +304,16 @@ def compares_two_periods(question: str) -> bool:
         or re.search(r"\b(?:den|until|through)\b", value)
         or re.search(r"\d{4}-\d{2}-\d{2}", value)
     )
-    return (
-        bool(re.search(COMPARE_WORDS, value))
-        and not is_range
-        and len(named_periods(question)) >= 2
-    )
+    periods = named_periods(question)
+    if is_range:
+        # "Tăng trưởng từ 2023 đến 2024": two consecutive years, quarters or months
+        # named with a change word are the two ends to compare, not a span to sum.
+        return (
+            bool(re.search(COMPARE_WORDS, value))
+            and len(periods) == 2
+            and periods[0][2] == periods[1][1]
+        )
+    return bool(re.search(COMPARE_WORDS, value)) and len(periods) >= 2
 
 
 def month_start(day: date, delta: int = 0) -> date:
@@ -333,7 +338,7 @@ EN_BEFORE = (
 EN_UNITS = {"year": "nam", "quarter": "quy", "month": "thang", "week": "tuan"}
 
 
-def _minus_year(day: date) -> date:
+def minus_year(day: date) -> date:
     try:
         return day.replace(year=day.year - 1)
     except ValueError:  # 29 February
@@ -362,7 +367,7 @@ def shifted_period(
     except (KeyError, ValueError):
         return None
     if year_ago:
-        return _minus_year(start), _minus_year(end)
+        return minus_year(start), minus_year(end)
     if english:
         word = english.group("a") or english.group("b")
         unit = EN_UNITS.get(word)

@@ -79,7 +79,12 @@ from app.presentation.analysis import (
 from app.presentation.charts import TABLE, VizConfig, validate_viz
 from app.presentation.contract import AskRequest, response
 from app.presentation.messages import Explained, friendly
-from app.presentation.summary import factual, numbers_match, share_text
+from app.presentation.summary import (
+    factual,
+    numbers_match,
+    share_text,
+    top_share_text,
+)
 from app.presentation.visualization import (
     chart,
     requested_chart,
@@ -96,6 +101,7 @@ from app.query.comparison import (
     shift_pair,
     side_by_side,
     with_earlier_period,
+    year_over_year,
 )
 from app.query.forecast import (
     METHOD_VERSION,
@@ -1244,6 +1250,13 @@ def answer_one(
                 with_earlier_period(named_periods(body.question), slots)
                 or relative_pair(body.question, slots, anchor)
                 or shift_pair(body.question, slots, anchor)
+                or year_over_year(
+                    body.question,
+                    intent.period,
+                    intent.start_date,
+                    intent.end_date,
+                    anchor,
+                )
             )
         if len(periods) >= 2:
             if intent.dimension in {"month", "day", "week"} and (
@@ -1513,6 +1526,24 @@ def answer_one(
                 next_turns(prior, body.question, question),
             )
             return 200, response(outcome, question, request_id, conversation_id)
+        whole: Decimal | None = None
+        if (
+            rows
+            and is_share_question(body.question)
+            and intent.limit < 100
+            and intent.dimension in GROUP_COLUMN
+            and plan.metric_id in {"revenue", "production_output"}
+        ):
+            # "Top 3 ... chiếm bao nhiêu phần trăm": against the whole, not the top 3.
+            whole_intent = intent.model_copy(
+                update={"dimension": "none", "series_dimension": "none", "limit": 1}
+            )
+            whole_plan, _, _ = route_query(
+                body.question, whole_intent, user["role"], anchor, state, budget
+            )
+            whole_rows = run_query(state.warehouse, whole_plan, budget)
+            if whole_rows and whole_rows[0].get(plan.metric_id) is not None:
+                whole = Decimal(str(whole_rows[0][plan.metric_id]))
         outcome = "ok" if rows else "no_data"
         save_context(
             storage,
@@ -1536,6 +1567,12 @@ def answer_one(
                     share_of
                     and plan.metric_id == "revenue"
                     and share_text(rows, share_of, plan.start, plan.end, body.language)
+                )
+                or (
+                    whole is not None
+                    and top_share_text(
+                        plan.metric_id, rows, whole, plan.start, plan.end, body.language
+                    )
                 )
                 or factual(
                     plan.metric_id,

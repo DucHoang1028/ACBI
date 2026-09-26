@@ -3,6 +3,7 @@
 Each period is an ordinary validated query; this module only finds the periods and
 lays the results next to each other. Every figure in the text comes from the rows."""
 
+import re
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -10,10 +11,12 @@ from typing import Any
 from app.core.dates import (
     Period,
     date_hints,
+    minus_year,
     month_start,
     resolve_period,
     shifted_period,
 )
+from app.core.text import fold
 from app.metadata import vocabulary
 from app.presentation.analysis import amount, percent
 
@@ -112,6 +115,42 @@ def shift_pair(question: str, slots: dict[str, Any], anchor: date) -> list[Perio
                 (kind_of(*moved), moved[0], moved[1]),
                 (kind_of(start, end), start, end),
             ],
+            key=lambda p: p[1],
+        )
+    )
+
+
+YEAR_OVER_YEAR = (
+    r"\bso voi (?:cung ky )?nam (?:truoc|ngoai)\b|"
+    r"\b(?:than|vs|versus|from|compared (?:to|with)) (?:the )?(?:previous|last) year\b|"
+    r"\byear[- ]over[- ]year\b|\byoy\b"
+)
+
+
+def year_over_year(
+    question: str,
+    period: str | None,
+    start_date: str | None,
+    end_date: str | None,
+    anchor: date,
+) -> list[Period]:
+    """ "...giảm so với năm trước": the window asked (last year unless stated) and the
+    same window a year earlier."""
+    if not re.search(YEAR_OVER_YEAR, fold(question)):
+        return []
+    try:
+        if period == "explicit":
+            start, end = date.fromisoformat(str(start_date)), date.fromisoformat(
+                str(end_date)
+            )
+        else:
+            start, end = resolve_period(period or "last_year", anchor)
+    except ValueError:
+        return []
+    ago = (minus_year(start), minus_year(end))
+    return _uniform(
+        sorted(
+            [(kind_of(*ago), *ago), (kind_of(start, end), start, end)],
             key=lambda p: p[1],
         )
     )
@@ -273,6 +312,25 @@ def side_by_side(
             if vi
             else f" Biggest rise: {top[0]} ({signed(top[1], language)}); "
             f"weakest: {bottom[0]} ({signed(bottom[1], language)})."
+        )
+    fell = sorted((m for m in moves if m[1] < 0), key=lambda m: m[1])[:6]
+    if moves:
+        reading += (
+            (
+                " Giảm: "
+                + ", ".join(f"{n} ({signed(v, language)})" for n, v in fell)
+                + "."
+                if fell
+                else " Không nhóm nào giảm."
+            )
+            if vi
+            else (
+                " Fell: "
+                + ", ".join(f"{n} ({signed(v, language)})" for n, v in fell)
+                + "."
+                if fell
+                else " No group fell."
+            )
         )
     span = f"{first_label} – {last_label}"
     head = (
