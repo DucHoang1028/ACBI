@@ -889,3 +889,17 @@ def test_the_three_largest_are_kept_and_a_ratio_is_stated() -> None:
         "vi",
     )
     assert said is not None and said.startswith("Bikes gấp 50,0 lần Accessories")
+
+
+def test_the_last_n_days_are_set_against_the_n_days_before() -> None:
+    from datetime import date
+
+    from app.query.comparison import day_windows
+
+    anchor = date(2025, 6, 29)
+    assert day_windows("Doanh thu 7 ngày gần nhất so với 7 ngày trước đó", anchor) == [
+        ("range", date(2025, 6, 15), date(2025, 6, 22)),
+        ("range", date(2025, 6, 22), date(2025, 6, 29)),
+    ]
+    assert day_windows("revenue last 30 days vs the previous 30 days", anchor)
+    assert not day_windows("Doanh thu 7 ngày qua", anchor)

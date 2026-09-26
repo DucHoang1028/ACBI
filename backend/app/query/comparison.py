@@ -173,6 +173,29 @@ def top_n(question: str) -> int | None:
     return int(number_) if number_ else None
 
 
+DAY_WINDOWS = (
+    r"\b(\d{1,3}) (?:ngay|days?)(?: gan nhat| qua)?\b.*?"
+    r"\b(?:so voi|vs|versus|compared (?:to|with)|than)\b.*?"
+    r"\b(?:ngay truoc|truoc do|truoc nua|previous|prior|before)\b"
+    r"|\b(?:last|past) (\d{1,3}) days?\b.*?"
+    r"\b(?:so voi|vs|versus|compared (?:to|with)|than)\b.*?"
+    r"\b(?:previous|prior|before)\b"
+)
+
+
+def day_windows(question: str, anchor: date) -> list[Period]:
+    """ "7 ngày gần nhất so với 7 ngày trước đó": the last N days and the N before."""
+    found = re.search(DAY_WINDOWS, fold(question))
+    if not found:
+        return []
+    days = int(next(g for g in found.groups() if g))
+    if not 1 <= days <= 366:
+        return []
+    end = anchor  # the anchor day itself is still filling in
+    start = end - timedelta(days=days)
+    return [("range", start - timedelta(days=days), start), ("range", start, end)]
+
+
 def relative_pair(question: str, slots: dict[str, Any], anchor: date) -> list[Period]:
     """ "So sánh với năm ngoái" after a this-year answer: the same stretch of both.
 
