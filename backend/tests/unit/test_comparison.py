@@ -903,3 +903,13 @@ def test_the_last_n_days_are_set_against_the_n_days_before() -> None:
     ]
     assert day_windows("revenue last 30 days vs the previous 30 days", anchor)
     assert not day_windows("Doanh thu 7 ngày qua", anchor)
+
+
+def test_a_dependent_second_metric_is_its_own_request() -> None:
+    from app.conversation.intent import split_tasks
+
+    asked = "Nhà máy nào sản xuất nhiều nhất năm 2024 và tỷ lệ phế phẩm của nó là bao nhiêu?"
+    assert split_tasks(asked) == [
+        "Nhà máy nào sản xuất nhiều nhất năm 2024",
+        "tỷ lệ phế phẩm của nó là bao nhiêu",
+    ]

@@ -18,7 +18,7 @@ businessMetrics:
   name: Production output
   displayName: {vi: Sản lượng, en: Production output}
   synonyms:
-    vi: [sản lượng, số lượng sản xuất]
+    vi: [sản lượng, số lượng sản xuất, sản xuất nhiều, sản xuất được, sản xuất ra, lượng sản xuất]
     en: [production output, output, produced units]
   domain: production
   description: "Good units produced by work orders (ordered minus scrapped), dated by completion. Use for output or produced quantity (sản lượng)."

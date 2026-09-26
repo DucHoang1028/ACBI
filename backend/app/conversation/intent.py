@@ -141,7 +141,7 @@ BY = re.compile(r"\b(?:theo|by|per|moi|tung|each)\s+((?:[a-z]+\s?){1,3})")
 
 
 def _by_dimension(current: dict[str, Any], question: str) -> None:
-    """"Theo nhà máy" in the first task asks for that split, whatever the model kept."""
+    """ "Theo nhà máy" in the first task asks for that split, whatever the model kept."""
     if current["dimension"] != "none":
         return
     match = BY.search(fold(first_clause(question)))
@@ -151,7 +151,7 @@ def _by_dimension(current: dict[str, Any], question: str) -> None:
 
 
 def _which_dimension(current: dict[str, Any], intent: Intent, question: str) -> None:
-    """"Nhà máy nào ...?" asks about every factory: no factory filter, split by it."""
+    """ "Nhà máy nào ...?" asks about every factory: no factory filter, split by it."""
     value = fold(question)
     match = WHICH.search(value)
     if not match:
@@ -354,10 +354,9 @@ def merged_intent(
         # when the model copied it: the question itself names none.
         if "sales_territory" not in metric.dimensions:
             current["territory"] = None
-        if (
-            "factory" not in metric.dimensions
-            and not vocabulary.get().match_members(fold(question)).get("factory")
-        ):
+        if "factory" not in metric.dimensions and not vocabulary.get().match_members(
+            fold(question)
+        ).get("factory"):
             current["factory_id"] = None
     kept = str(slots.get("dimension"))
     splits = (
@@ -920,12 +919,12 @@ def split_tasks(question: str) -> list[str]:
                 or (re.match(IMPERATIVE, part) and (found or own_period))
                 or (found and found != first)
                 or (
-                found
-                and own_period
-                and first_owns_period
-                and first_names_metric
-                and not first_compares
-            )
+                    found
+                    and own_period
+                    and first_owns_period
+                    and first_names_metric
+                    and not first_compares
+                )
             )
         )
         if starts or not tasks:

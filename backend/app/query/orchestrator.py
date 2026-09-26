@@ -1256,9 +1256,9 @@ def answer_one(
             )
             return 200, response(outcome, question, request_id, conversation_id)
         growth_note = None
-        periods = (
-            named_periods(body.question) if comparing else []
-        ) or day_windows(body.question, anchor)
+        periods = (named_periods(body.question) if comparing else []) or day_windows(
+            body.question, anchor
+        )
         if not periods and re.search(COMPARE_WORDS, fold(body.question)):
             # "So sánh với 2023" after a 2024 answer: the period on screen and 2023.
             slots = (prior or {}).get("slots") or {}
@@ -1473,6 +1473,16 @@ def answer_one(
                 next_turns(prior, body.question, question),
             )
             return 200, response(outcome, question, request_id, conversation_id)
+        asked_top = top_n(body.question) if intent.dimension == "none" else None
+        if asked_top and (
+            single_dimension(fold(body.question)) in {*GROUP_COLUMN, "product"}
+        ):  # "top 3 sản phẩm chiếm bao nhiêu %": the model left the breakdown out
+            intent = intent.model_copy(
+                update={
+                    "dimension": single_dimension(fold(body.question)),
+                    "limit": asked_top,
+                }
+            )
         try:
             check_definition(intent, state.dictionary)
             plan, query_path, references = route_query(
