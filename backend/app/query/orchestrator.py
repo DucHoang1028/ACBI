@@ -92,6 +92,7 @@ from app.query.comparison import (
     MAX_PERIODS,
     adjacent,
     label,
+    relative_pair,
     side_by_side,
     with_earlier_period,
 )
@@ -897,6 +898,11 @@ def answer_one(
             previous = (latest or {}).get("payload") or {}
             named = vocabulary.get().match_members(fold(body.question))
             window = (previous.get("sources") or {}).get("parameters") or {}
+            # A table cut down to some territories is not the whole: a share of "all
+            # territories" must be queried, not read from it.
+            partial = follow == "share" and any(
+                k == "territory" or k.startswith("territory_") for k in window
+            )
             share = (
                 share_text(
                     previous.get("table") or [],
@@ -905,7 +911,10 @@ def answer_one(
                     date.fromisoformat(str(window["end"])),
                     body.language,
                 )
-                if follow == "share" and named.get("sales_territory") and window
+                if follow == "share"
+                and named.get("sales_territory")
+                and window
+                and not partial
                 else None
             )
             shown = {fold(n) for names in named.values() for n in names}
@@ -922,6 +931,7 @@ def answer_one(
                     body.language,
                 )
                 if latest
+                and not partial
                 and previous.get("table")
                 and latest["metric_id"] in vocabulary.get().metrics
                 and not fresh_request(
@@ -1228,9 +1238,10 @@ def answer_one(
         periods = named_periods(body.question) if comparing else []
         if not periods and re.search(COMPARE_WORDS, fold(body.question)):
             # "So sánh với 2023" after a 2024 answer: the period on screen and 2023.
+            slots = (prior or {}).get("slots") or {}
             periods = with_earlier_period(
-                named_periods(body.question), (prior or {}).get("slots") or {}
-            )
+                named_periods(body.question), slots
+            ) or relative_pair(body.question, slots, anchor)
         if len(periods) >= 2:
             if intent.dimension in {"month", "day", "week"} and (
                 single_dimension(fold(body.question)) != intent.dimension

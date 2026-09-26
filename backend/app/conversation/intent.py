@@ -349,11 +349,15 @@ def merged_intent(
     ):
         current["metric_id"] = "revenue"  # only sales figures split by territory
     metric = vocabulary.get().metrics.get(str(current.get("metric_id")))
-    if metric and not hints.get("territory") and not intent.territory:
-        # A territory kept from a revenue answer means nothing for production.
+    if metric and not hints.get("territory"):
+        # A territory kept from a revenue answer means nothing for production, even
+        # when the model copied it: the question itself names none.
         if "sales_territory" not in metric.dimensions:
             current["territory"] = None
-        if "factory" not in metric.dimensions and not intent.factory_id:
+        if (
+            "factory" not in metric.dimensions
+            and not vocabulary.get().match_members(fold(question)).get("factory")
+        ):
             current["factory_id"] = None
     kept = str(slots.get("dimension"))
     splits = (

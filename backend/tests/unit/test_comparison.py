@@ -598,3 +598,37 @@ def test_the_period_before_keeps_the_calendar_unit_and_stands_alone() -> None:
     prior = {"slots": {"metric_id": "revenue", "dimension": "none", **q1, "limit": 100}}
     merged = merged_intent(blank, prior, "kỳ trước đó")
     assert merged.metric_id == "revenue" and not merged.needs_clarification
+
+
+def test_compare_with_last_year_sets_the_same_stretch_of_both_years() -> None:
+    from datetime import date
+
+    from app.query.comparison import label, relative_pair
+
+    anchor = date(2025, 6, 29)
+    pair = relative_pair("so sánh với năm ngoái", {"period": "this_year"}, anchor)
+    assert [(s, e) for _, s, e in pair] == [
+        (date(2024, 1, 1), date(2024, 6, 30)),
+        (date(2025, 1, 1), date(2025, 6, 30)),
+    ]
+    assert label(pair[0], "vi") == "01/01/2024–29/06/2024"
+    assert relative_pair("so sánh với năm ngoái", {"period": "last_year"}, anchor) == []
+    assert relative_pair("so sánh với 2023", {"period": "this_year"}, anchor) == []
+
+
+def test_a_metric_switch_drops_a_territory_the_question_never_names() -> None:
+    from app.ai.client import Intent
+    from app.conversation.intent import merged_intent
+
+    raw = Intent.model_validate(
+        {
+            "metric_id": "production_output", "dimension": "none", "period": "explicit",
+            "start_date": "2024-01-01", "end_date": "2025-01-01", "factory_id": 1,
+            "territory": "Canada|France", "limit": 100, "needs_clarification": False,
+            "clarification_question": None, "zero_scrap_only": False,
+        }
+    )  # fmt: skip
+    resolved = merged_intent(raw, None, "sản lượng cùng kỳ")
+    assert resolved.territory is None  # copied from a revenue answer, named nowhere
+    named = merged_intent(raw, None, "sản lượng Factory A của Canada")
+    assert named.territory == "Canada|France" or named.territory is not None

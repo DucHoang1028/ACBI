@@ -3,11 +3,11 @@
 Each period is an ordinary validated query; this module only finds the periods and
 lays the results next to each other. Every figure in the text comes from the rows."""
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from app.core.dates import Period, month_start
+from app.core.dates import Period, date_hints, month_start, resolve_period
 from app.metadata import vocabulary
 from app.presentation.analysis import amount, percent
 
@@ -23,13 +23,15 @@ GROUP_COLUMN = {
 
 
 def label(period: Period, language: str) -> str:
-    kind, start, _ = period
+    kind, start, end = period
     vi = language == "vi"
     if kind == "year":
         return f"Năm {start.year}" if vi else f"Year {start.year}"
     if kind == "quarter":
         quarter = (start.month - 1) // 3 + 1
         return f"Quý {quarter}/{start.year}" if vi else f"Q{quarter} {start.year}"
+    if kind == "range":
+        return f"{start:%d/%m/%Y}–{end - timedelta(days=1):%d/%m/%Y}"
     return f"Tháng {start.month}/{start.year}" if vi else f"{start:%b %Y}"
 
 
@@ -64,6 +66,40 @@ def with_earlier_period(named: list[Period], slots: dict[str, Any]) -> list[Peri
     if kind != named[0][0] or named[0][1] == start:
         return []
     return sorted([named[0], (kind, start, end)], key=lambda p: p[1])
+
+
+def relative_pair(question: str, slots: dict[str, Any], anchor: date) -> list[Period]:
+    """ "So sánh với năm ngoái" after a this-year answer: the same stretch of both.
+
+    The named period (last year, last quarter, last month) is set against the period
+    on screen; when that one is still running, the named one is cut to the same length
+    so that a part-year is not set against a whole year."""
+    name = date_hints(question).get("period")
+    if name not in {"last_year", "last_quarter", "last_month"}:
+        return []
+    try:
+        if slots.get("period") == "explicit":
+            start = date.fromisoformat(str(slots["start_date"]))
+            end = date.fromisoformat(str(slots["end_date"]))
+        else:
+            start, end = resolve_period(str(slots["period"]), anchor)
+    except (KeyError, ValueError):
+        return []
+    named_start, named_end = resolve_period(name, anchor)
+    if (named_start, named_end) == (start, end):
+        return []
+    if name == "last_year":  # the same calendar stretch, not the same number of days
+        try:
+            same_stretch = end.replace(year=end.year - 1)
+        except ValueError:  # 29 February
+            same_stretch = end.replace(year=end.year - 1, day=28)
+        named_end = min(named_end, same_stretch)
+    else:
+        named_end = min(named_end, named_start + (end - start))
+    return sorted(
+        [("range", named_start, named_end), ("range", start, end)],
+        key=lambda p: p[1],
+    )
 
 
 def number(value: Any) -> Decimal | None:
