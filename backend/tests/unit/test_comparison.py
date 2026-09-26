@@ -908,8 +908,22 @@ def test_the_last_n_days_are_set_against_the_n_days_before() -> None:
 def test_a_dependent_second_metric_is_its_own_request() -> None:
     from app.conversation.intent import split_tasks
 
-    asked = "Nhà máy nào sản xuất nhiều nhất năm 2024 và tỷ lệ phế phẩm của nó là bao nhiêu?"
+    asked = (
+        "Nhà máy nào sản xuất nhiều nhất năm 2024 và tỷ lệ phế phẩm của nó là "
+        "bao nhiêu?"
+    )
     assert split_tasks(asked) == [
         "Nhà máy nào sản xuất nhiều nhất năm 2024",
         "tỷ lệ phế phẩm của nó là bao nhiêu",
     ]
+
+
+def test_a_plain_top_n_share_is_read_without_the_model() -> None:
+    from app.conversation.intent import top_share_intent
+
+    found = top_share_intent(
+        "Top 3 sản phẩm bán chạy nhất năm 2024 chiếm bao nhiêu % doanh thu?", 3
+    )
+    assert found is not None
+    assert (found.metric_id, found.dimension, found.limit) == ("revenue", "product", 3)
+    assert top_share_intent("Top 3 chiếm bao nhiêu %", 3) is None

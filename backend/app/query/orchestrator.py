@@ -41,6 +41,7 @@ from app.conversation.intent import (
     resolve_corrections,
     resume_pending,
     split_tasks,
+    top_share_intent,
     unstick,
     validate_choices,
 )
@@ -1088,6 +1089,14 @@ def answer_one(
                     raw = follow_up_intent(first, prior["slots"])
                 if raw is None:
                     raise
+        asked_top = top_n(first)
+        if (
+            asked_top
+            and is_share_question(first)
+            and (raw.needs_clarification or raw.intent_type == "unsupported")
+            and (own := top_share_intent(first, asked_top))
+        ):  # the model called a plain top-N share unsupported
+            raw = own
         if later:
             raw = raw.model_copy(update={"deferred_requests": waiting})
         else:

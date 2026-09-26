@@ -141,7 +141,7 @@ BY = re.compile(r"\b(?:theo|by|per|moi|tung|each)\s+((?:[a-z]+\s?){1,3})")
 
 
 def _by_dimension(current: dict[str, Any], question: str) -> None:
-    """ "Theo nhà máy" in the first task asks for that split, whatever the model kept."""
+    """"Theo nhà máy" in the first task asks for that split, whatever the model kept."""
     if current["dimension"] != "none":
         return
     match = BY.search(fold(first_clause(question)))
@@ -633,6 +633,35 @@ def local_intent(question: str) -> Intent | None:
             "clarification_question": None,
             "zero_scrap_only": False,
             "series_dimension": hints.get("series_dimension", "none"),
+        }
+    )
+
+
+def top_share_intent(question: str, count: int) -> Intent | None:
+    """"Top 3 sản phẩm chiếm bao nhiêu %": plain enough to read without a model.
+
+    Used when the model refuses a request the data can answer."""
+    hints = intent_hints(question)
+    dimension = single_dimension(fold(question))
+    if (
+        not hints.get("metric_id")
+        or hints.get("period") in (None, "recently")
+        or dimension in (None, "none", "month", "day", "week")
+    ):
+        return None
+    return Intent.model_validate(
+        {
+            "metric_id": hints["metric_id"],
+            "dimension": dimension,
+            "period": hints["period"],
+            "start_date": hints.get("start_date"),
+            "end_date": hints.get("end_date"),
+            "factory_id": None,
+            "territory": hints.get("territory"),
+            "limit": count,
+            "needs_clarification": False,
+            "clarification_question": None,
+            "zero_scrap_only": False,
         }
     )
 
