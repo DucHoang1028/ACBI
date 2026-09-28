@@ -101,6 +101,7 @@ from app.query.comparison import (
     adjacent,
     day_windows,
     label,
+    number,
     relative_pair,
     shift_pair,
     side_by_side,
@@ -292,13 +293,26 @@ def carry_slots(prior: dict[str, Any] | None, intent: Intent) -> dict[str, Any]:
     return slots
 
 
-def shown_members(rows: list[dict[str, Any]]) -> dict[str, list[str]]:
-    """Territories and factories on screen, so "those regions" can be resolved."""
-    shown: dict[str, list[str]] = {}
+def shown_members(
+    rows: list[dict[str, Any]], metric: str | None = None
+) -> dict[str, Any]:
+    """Territories and factories on screen, so "those regions" or "that one" resolve.
+
+    A "_top" entry names the highest-value member of each key, so a singular
+    follow-up ("khu vực đó", "của nó") can narrow to the one the question meant."""
+    shown: dict[str, Any] = {}
     for key in ("territory", "factory"):
         names = [str(r[key]) for r in rows if r.get(key)]
         if 1 < len(names) <= 10:
             shown[key] = names
+            if metric:
+                valued = [
+                    (str(r[key]), n)
+                    for r in rows
+                    if r.get(key) and (n := number(r.get(metric))) is not None
+                ]
+                if valued:
+                    shown[f"{key}_top"] = max(valued, key=lambda p: p[1])[0]
     return shown
 
 
@@ -813,7 +827,7 @@ def run_comparison(
             **base.model_dump(),
             "start_date": last[1].isoformat(),
             "end_date": last[2].isoformat(),
-            "shown": shown_members(table),
+            "shown": shown_members(table, metric_id),
         },
         None,
         next_turns(prior, body.question, None),
@@ -1610,7 +1624,7 @@ def answer_one(
             storage,
             conversation_id,
             user["id"],
-            {**intent.model_dump(), "shown": shown_members(rows)},
+            {**intent.model_dump(), "shown": shown_members(rows, plan.metric_id)},
             None,
             next_turns(prior, body.question, None),
         )

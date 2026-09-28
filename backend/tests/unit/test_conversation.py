@@ -854,6 +854,50 @@ def test_shown_members_are_kept_for_territories_and_factories() -> None:
     rows = [{"territory": "A", "revenue": 1}, {"territory": "B", "revenue": 2}]
     assert shown_members(rows) == {"territory": ["A", "B"]}
     assert shown_members([{"revenue": 1}]) == {}
+    assert shown_members(rows, "revenue") == {
+        "territory": ["A", "B"],
+        "territory_top": "B",
+    }
+
+
+def test_that_one_means_the_top_member_last_shown_not_all_of_them() -> None:
+    shown = {
+        "factory": ["Factory A", "Factory B", "Factory C"],
+        "factory_top": "Factory A",
+    }
+    prior = {
+        "slots": {
+            **intent(metric_id="production_output", dimension="factory").model_dump(),
+            "shown": shown,
+        }
+    }
+    raw = intent(
+        metric_id="defect_rate",
+        needs_clarification=False,
+        clarification_question=None,
+        missing_fields=[],
+    )
+    resolved = merged_intent(raw, prior, "tỷ lệ phế phẩm của nó là bao nhiêu")
+    assert (resolved.dimension, resolved.factory_id) == ("none", 1)
+
+    territory_shown = {
+        "territory": ["Southwest", "Canada", "Northwest"],
+        "territory_top": "Southwest",
+    }
+    prior2 = {
+        "slots": {
+            **intent(metric_id="revenue", dimension="sales_territory").model_dump(),
+            "shown": territory_shown,
+        }
+    }
+    raw2 = intent(
+        metric_id="revenue",
+        needs_clarification=False,
+        clarification_question=None,
+        missing_fields=[],
+    )
+    resolved2 = merged_intent(raw2, prior2, "khu vực đó tăng trưởng bao nhiêu")
+    assert (resolved2.dimension, resolved2.territory) == ("none", "Southwest")
 
 
 def test_a_later_still_clause_does_not_make_the_message_a_follow_up() -> None:

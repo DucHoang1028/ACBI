@@ -214,26 +214,43 @@ def _stacked_by_month(current: dict[str, Any], question: str) -> None:
         current.update(dimension="month", series_dimension="sales_territory", limit=250)
 
 
+PLURAL_REF = (
+    r"\b(?:cac|nhung|tung|moi)\s+(?:khu vuc|nuoc|nha may)\s+(?:do|nay|kia)\b|"
+    r"\b(?:those|these|them)\b"
+)
+SINGULAR_REF = (
+    r"\b(?:khu vuc|nuoc|nha may|region|territor\w*|factor\w*)\s+(?:do|nay|kia)\b|"
+    r"\bcua no\b|\bthat (?:region|territory|factory|one)\b|\b(?:of|for) it\b"
+)
+
+
 def _those_members(
     current: dict[str, Any], slots: dict[str, Any], intent: Intent, question: str
 ) -> None:
-    """Growth for those regions: what the last answer showed on screen."""
+    """"Those regions" (all shown) or "that one"/"của nó" (the top one shown)."""
     value = fold(question)
-    if not re.search(
-        r"\b(?:khu vuc|nuoc|nha may|region|territor\w*|factor\w*)\s+(?:do|nay|kia)\b|"
-        r"\b(?:those|these|them)\b",
-        value,
-    ):
+    plural = bool(re.search(PLURAL_REF, value))
+    if not (plural or re.search(SINGULAR_REF, value)):
         return
     shown = slots.get("shown") or {}
     if shown.get("territory") and not intent.territory:
-        current["territory"] = "|".join(dict.fromkeys(shown["territory"]))
-        if current["dimension"] == "none":
-            current["dimension"] = "sales_territory"
-        current["limit"] = 100
+        if plural:
+            current["territory"] = "|".join(dict.fromkeys(shown["territory"]))
+            if current["dimension"] == "none":
+                current["dimension"] = "sales_territory"
+            current["limit"] = 100
+        elif top := shown.get("territory_top"):
+            current["territory"] = top
+            current["dimension"] = "none"
     elif shown.get("factory") and intent.factory_id is None:
-        current["dimension"] = "factory"
-        current["limit"] = 100
+        if plural:
+            current["dimension"] = "factory"
+            current["limit"] = 100
+        elif top := shown.get("factory_top"):
+            factory_id = vocabulary.get().ids("factory").get(top)
+            if factory_id is not None:
+                current["factory_id"] = factory_id
+                current["dimension"] = "none"
 
 
 def merged_intent(
@@ -369,7 +386,9 @@ def merged_intent(
         and current["dimension"] == "none"
         and slots.get("dimension") not in (None, "none")
         and splits
-    ):
+        and current.get("factory_id") is None
+        and not current.get("territory")
+    ):  # "của nó" already narrowed to one member: no breakdown is wanted
         current["dimension"] = slots["dimension"]
     _close_end(current)
     if current["period"] == "explicit" and not any(k in hints for k in PERIOD_KEYS):
