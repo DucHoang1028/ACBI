@@ -635,11 +635,16 @@ def run_forecast(
             },
         },
     )
+    # Remember what was just forecast, so "3 months more" or "and for Germany" keeps
+    # this metric and scope instead of reverting to an earlier, unrelated request.
     save_context(
         storage,
         conversation_id,
         user["id"],
-        (prior or {}).get("slots") or {},
+        carry_slots(
+            prior,
+            checked.model_copy(update={"metric_id": metric, "horizon_months": horizon}),
+        ),
         None,
         next_turns(prior, body.question, None),
     )
