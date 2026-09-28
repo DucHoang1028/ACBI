@@ -933,3 +933,38 @@ def test_a_bare_top_n_refinement_is_not_a_separate_task() -> None:
     from app.conversation.intent import further_requests
 
     assert further_requests("Doanh thu quý trước, chia theo khu vực, top 3, cột") == []
+
+
+def test_carry_slots_drops_territory_that_does_not_fit_the_new_metric() -> None:
+    from app.query.orchestrator import carry_slots
+
+    # A revenue-by-territory answer leaves territory and dimension in the slots.
+    prior_slots = carry_slots(
+        None,
+        intent(
+            metric_id="revenue",
+            dimension="sales_territory",
+            territory="Australia|Canada",
+            period="explicit",
+            start_date="2022-01-01",
+            end_date="2025-06-30",
+            needs_clarification=False,
+            missing_fields=[],
+        ),
+    )
+    prior = {"slots": prior_slots}
+    # A forecast for a different metric, asked in the same conversation, must not
+    # inherit a territory or dimension that metric does not have.
+    forecast = intent(
+        metric_id="production_output",
+        intent_type="forecast",
+        dimension="none",
+        territory=None,
+        period=None,
+        needs_clarification=True,
+        missing_fields=["horizon_months"],
+    )
+    next_slots = carry_slots(prior, forecast)
+    assert next_slots["metric_id"] == "production_output"
+    assert "territory" not in next_slots
+    assert "dimension" not in next_slots

@@ -270,6 +270,25 @@ def carry_slots(prior: dict[str, Any] | None, intent: Intent) -> dict[str, Any]:
         slots.pop("factory_id", None)
     if intent.dimension == "sales_territory":
         slots.pop("territory", None)
+    # A territory or factory kept from a different metric's turn (a compound message
+    # runs several requests on one conversation) means nothing once the metric no
+    # longer has that dimension: carrying it would mislead the next turn's model.
+    metric = vocabulary.get().metrics.get(str(slots.get("metric_id")))
+    if metric is not None:
+        if "sales_territory" not in metric.dimensions:
+            slots.pop("territory", None)
+        if "factory" not in metric.dimensions:
+            slots.pop("factory_id", None)
+        kept_dimension = slots.get("dimension")
+        if (
+            kept_dimension
+            and kept_dimension not in metric.dimensions
+            and not (
+                kept_dimension in {"day", "week", "month"}
+                and "date" in metric.dimensions
+            )
+        ):
+            slots.pop("dimension", None)
     return slots
 
 
