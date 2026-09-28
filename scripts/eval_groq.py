@@ -50,10 +50,18 @@ TOTALS = {
 
 
 def ask(
-    client: TestClient, headers: dict[str, str], question: str, conversation: str | None
+    client: TestClient,
+    headers: dict[str, str],
+    question: str,
+    conversation: str | None,
+    relogin: Any = None,
 ) -> tuple[dict[str, Any], int]:
-    """Ask once; wait and retry while the local or provider rate limits are busy."""
+    """Ask once; wait and retry while the local or provider rate limits are busy.
+
+    A run with many rate-limit waits can outlast the 15-minute access token, so a
+    401 (no "status" in the body) triggers one re-login, mutating headers in place."""
     retries = 0
+    relogged_in = False
     while True:
         result = client.post(
             "/api/chat/ask",
@@ -65,6 +73,10 @@ def ask(
             },
         )
         body = result.json()
+        if "status" not in body and relogin and not relogged_in:
+            relogin(headers)
+            relogged_in = True
+            continue
         if body.get("status") == "technical_failure" and retries < 8:
             retries += 1
             time.sleep(15)
@@ -197,6 +209,17 @@ def main() -> None:
             )
             assert login.status_code == 200, user
             tokens[user] = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+        def relogin_for(user: str) -> Any:
+            def relogin(headers: dict[str, str]) -> None:
+                login = client.post(
+                    "/api/auth/login",
+                    json={"username": user, "password": credentials[user]},
+                )
+                headers["Authorization"] = f"Bearer {login.json()['access_token']}"
+
+            return relogin
+
         conversations: dict[str, str] = {}
         last_said: dict[str, str] = {}
         only = (
@@ -216,6 +239,7 @@ def main() -> None:
                 tokens[item["user"]],
                 item["question"],
                 conversations.get(group) if group else None,
+                relogin_for(item["user"]),
             )
             if group and body.get("conversation_id"):
                 conversations[group] = body["conversation_id"]

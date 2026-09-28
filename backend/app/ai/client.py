@@ -637,8 +637,7 @@ class GroqClient:
                         "role": "system",
                         "content": system
                         + "\nReturn ONLY one JSON object, no prose and no code "
-                        "fence, that matches this JSON Schema:\n"
-                        + json.dumps(schema),
+                        "fence, that matches this JSON Schema:\n" + json.dumps(schema),
                     },
                     payload["messages"][1],
                 ]
@@ -667,9 +666,11 @@ class GroqClient:
                 reservation = self.pool.reserve(state, estimated)
                 try:
                     with httpx.Client(
-                        timeout=min(12, budget.remaining() / 2)
-                        if state.json_object
-                        else min(10, budget.remaining() / 4)
+                        timeout=(
+                            min(12, budget.remaining() / 2)
+                            if state.json_object
+                            else min(10, budget.remaining() / 4)
+                        )
                     ) as client:
                         response = client.post(
                             f"{state.url or GROQ_URL}/chat/completions",

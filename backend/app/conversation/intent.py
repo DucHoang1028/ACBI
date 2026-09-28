@@ -141,7 +141,7 @@ BY = re.compile(r"\b(?:theo|by|per|moi|tung|each)\s+((?:[a-z]+\s?){1,3})")
 
 
 def _by_dimension(current: dict[str, Any], question: str) -> None:
-    """"Theo nhà máy" in the first task asks for that split, whatever the model kept."""
+    """ "Theo nhà máy" in the first task asks for that split, no matter the model."""
     if current["dimension"] != "none":
         return
     match = BY.search(fold(first_clause(question)))
@@ -358,11 +358,11 @@ def merged_intent(
             fold(question)
         ).get("factory"):
             current["factory_id"] = None
-    kept = str(slots.get("dimension"))
+    kept_dimension = str(slots.get("dimension"))
     splits = (
         metric is None
-        or kept in metric.dimensions
-        or (kept in {"day", "week", "month"} and "date" in metric.dimensions)
+        or kept_dimension in metric.dimensions
+        or (kept_dimension in {"day", "week", "month"} and "date" in metric.dimensions)
     )
     if (
         not standalone
@@ -638,7 +638,7 @@ def local_intent(question: str) -> Intent | None:
 
 
 def top_share_intent(question: str, count: int) -> Intent | None:
-    """"Top 3 sản phẩm chiếm bao nhiêu %": plain enough to read without a model.
+    """ "Top 3 sản phẩm chiếm bao nhiêu %": plain enough to read without a model.
 
     Used when the model refuses a request the data can answer."""
     hints = intent_hints(question)
@@ -964,10 +964,10 @@ def split_tasks(question: str) -> list[str]:
             tasks[-1] += f"{joiner}{original}"
     if len(tasks) < 2:
         return [question]
-    found = list(re.finditer(OWN_PERIOD, fold(tasks[-1])))
-    if found:
+    periods = list(re.finditer(OWN_PERIOD, fold(tasks[-1])))
+    if periods:
         # "Doanh thu Canada và sản lượng Factory A quý trước": one period for both.
-        phrase = tasks[-1][found[-1].start() : found[-1].end()]
+        phrase = tasks[-1][periods[-1].start() : periods[-1].end()]
         vocab = vocabulary.get()
 
         def shares(t: str) -> bool:

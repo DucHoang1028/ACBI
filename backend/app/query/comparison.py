@@ -358,13 +358,13 @@ def side_by_side(
         else f" Top in {last_label}: {lead[by]} ({lead_value})."
     )
     if moves:
-        top, bottom = max(moves, key=lambda m: m[1]), min(moves, key=lambda m: m[1])
+        best, worst = max(moves, key=lambda m: m[1]), min(moves, key=lambda m: m[1])
         reading += (
-            f" Tăng mạnh nhất: {top[0]} ({signed(top[1], language)}); "
-            f"thấp nhất: {bottom[0]} ({signed(bottom[1], language)})."
+            f" Tăng mạnh nhất: {best[0]} ({signed(best[1], language)}); "
+            f"thấp nhất: {worst[0]} ({signed(worst[1], language)})."
             if vi
-            else f" Biggest rise: {top[0]} ({signed(top[1], language)}); "
-            f"weakest: {bottom[0]} ({signed(bottom[1], language)})."
+            else f" Biggest rise: {best[0]} ({signed(best[1], language)}); "
+            f"weakest: {worst[0]} ({signed(worst[1], language)})."
         )
     fell = sorted((m for m in moves if m[1] < 0), key=lambda m: m[1])[:6]
     if moves:

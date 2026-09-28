@@ -349,7 +349,7 @@ def minus_year(day: date) -> date:
 def shifted_period(
     question: str, slots: dict[str, object], anchor: date
 ) -> tuple[date, date] | None:
-    """"Cùng kỳ năm trước" or "quý trước đó nữa": the earlier answer's period, moved.
+    """ "Cùng kỳ năm trước" or "quý trước đó nữa": the earlier answer's period, moved.
 
     The year-ago wording moves the whole window back a year; the "before that"
     wording takes the unit (or the same span) just before the window's start."""

@@ -681,6 +681,7 @@ def run_comparison(
         checked.missing_fields
     ):
         return ask_again(clarification_text(checked, body.language))
+    metric_id = intent.metric_id
     intent = checked.model_copy(
         update={"needs_clarification": False, "missing_fields": []}
     )
@@ -732,7 +733,7 @@ def run_comparison(
         results.append((label(period, body.language), rows))
         plans.append(plan)
     table, answer_text = side_by_side(
-        intent.metric_id,
+        metric_id,
         results,
         group,
         "" if group else ", ".join(territories + factory_names),
@@ -755,7 +756,7 @@ def run_comparison(
         }
         | {"start": periods[0][1].isoformat(), "end": periods[-1][2].isoformat()},
         "retrieved_at": datetime.now(timezone.utc).isoformat(),
-        "metric_versions": {intent.metric_id: plans[-1].version},
+        "metric_versions": {metric_id: plans[-1].version},
         "data_as_of": anchor.isoformat(),
         "anchor_source": state.readiness["anchor_source"],
         "references": [],
@@ -797,7 +798,7 @@ def run_comparison(
         storage,
         user["id"],
         body.question,
-        intent.metric_id,
+        metric_id,
         authorize(base, user["role"]),
         payload,
     )
@@ -1084,9 +1085,10 @@ def answer_one(
             except (LLMBusy, httpx.HTTPError):
                 # Every AI key is resting or slow: plain wording needs no model.
                 raw = local_intent(first)
-                if raw is None and (prior or {}).get("slots"):
+                prior_slots = (prior or {}).get("slots")
+                if raw is None and prior_slots:
                     # the earlier turn fills in the rest
-                    raw = follow_up_intent(first, prior["slots"])
+                    raw = follow_up_intent(first, prior_slots)
                 if raw is None:
                     raise
         asked_top = top_n(first)
@@ -1701,11 +1703,13 @@ def answer_one(
             logger.warning("Request %s: context not saved", request_id)
         return 200, response(
             outcome,
-            "Tôi chưa hiểu rõ câu hỏi này sau nhiều lần thử. Hãy diễn đạt lại ngắn "
-            "gọn hơn, gồm chỉ số, khoảng thời gian và cách chia nhóm."
-            if body.language == "vi"
-            else "I could not make sense of this after several tries. Please rephrase "
-            "it briefly with the metric, the period and the breakdown.",
+            (
+                "Tôi chưa hiểu rõ câu hỏi này sau nhiều lần thử. Hãy diễn đạt lại ngắn "
+                "gọn hơn, gồm chỉ số, khoảng thời gian và cách chia nhóm."
+                if body.language == "vi"
+                else "I could not make sense of this after several tries. Please "
+                "rephrase it briefly with the metric, the period and the breakdown."
+            ),
             request_id,
             conversation_id,
         )
