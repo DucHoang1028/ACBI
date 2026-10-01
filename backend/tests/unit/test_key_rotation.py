@@ -203,6 +203,69 @@ def test_a_key_with_a_gap_is_not_offered_again_until_the_gap_has_passed() -> Non
     assert 6.0 < pool.wait_time(100) <= 7.0
 
 
+def single_provider(
+    monkeypatch: pytest.MonkeyPatch, status: int, body: dict, **keys: str
+) -> GroqClient:
+    """A client whose every call is answered with one fixed error."""
+    monkeypatch.setattr(
+        client_module.httpx,
+        "Client",
+        lambda *a, **k: REAL_CLIENT(
+            transport=httpx.MockTransport(lambda r: httpx.Response(status, json=body)),
+            timeout=5,
+        ),
+    )
+    common = {"_env_file": None, "warehouse_password": "x", "app_db_password": "x"}
+    return GroqClient(Settings(**common, **keys))  # type: ignore[arg-type]
+
+
+def test_a_rate_limit_sent_as_403_is_a_short_wait_not_a_broken_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import time
+
+    groq = single_provider(
+        monkeypatch,
+        403,
+        {
+            "error": "[LiteRouter] Rate limit exceeded for your tier (7 seconds "
+            "between messages)."
+        },
+        literouter_api_key="l1",
+        llm_provider_order="literouter",
+    )
+    with pytest.raises(LLMBusy):  # "AI busy, ask again", not a technical failure
+        ask(groq)
+    rest = groq.pool.states[0].rest_until - time.monotonic()
+    assert 0 < rest <= 7.5  # the provider's own gap, not the hour a dead key gets
+
+
+def test_a_daily_quota_rests_the_key_for_an_hour(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import time
+
+    groq = single_provider(
+        monkeypatch,
+        429,
+        {
+            "error": {
+                "code": 429,
+                "details": [
+                    {"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}
+                ],
+            }
+        },
+        gemini_api_keys="m1",
+        gemini_model="model-a",
+        llm_provider_order="gemini",
+    )
+    with pytest.raises(LLMBusy):
+        ask(groq)
+    # Asking again every minute only spends time on a key that is out for the day.
+    assert groq.pool.states[0].rest_until - time.monotonic() > 3000
+
+
 def test_any_provider_key_switches_the_model_on() -> None:
     common = {"_env_file": None, "warehouse_password": "x", "app_db_password": "x"}
     assert not Settings(**common).has_llm_keys()

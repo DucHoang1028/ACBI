@@ -652,6 +652,7 @@ class GroqClient:
             # One logical call, however many keys it has to try.
             budget.consume()
             error: Exception | None = None
+            limited = False  # the last key failed on a rate or quota limit
             keys = self.pool.available(estimated)
             if not keys:
                 # Every key is busy: a short wait is better than a failed answer.
@@ -721,6 +722,13 @@ class GroqClient:
                         )
                         raise  # the request itself is wrong; another key cannot help
                     retry_after = _retry_after(failure.response.headers)
+                    said = failure.response.text
+                    if status == 403 and "rate limit" in said.lower():
+                        # LiteRouter says "too soon" with 403: a wait, not a dead key.
+                        status, retry_after = 429, retry_after or state.gap or None
+                    if status == 429 and "PerDay" in said:
+                        retry_after = 3600.0  # out for the day: stop asking each minute
+                    limited = status == 429
                     self.pool.failed(state, status, retry_after)
                     logger.warning(
                         "llm %s failed on %s: HTTP %s (retry after %s); %s",
@@ -747,10 +755,7 @@ class GroqClient:
             if error is None:
                 continue
             if not isinstance(error, ValueError):
-                if (
-                    isinstance(error, httpx.HTTPStatusError)
-                    and error.response.status_code == 429
-                ):
+                if isinstance(error, httpx.HTTPStatusError) and limited:
                     raise LLMBusy("Every Groq key is rate limited") from error
                 raise error  # every usable key failed
             if attempt >= self.regenerations or budget.calls >= budget.max_calls:
