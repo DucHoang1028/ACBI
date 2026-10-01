@@ -46,7 +46,8 @@ def factual(
         label = vocab.metric_label(metric_id, "vi")
         period_vi = f"{start:%d/%m/%Y} đến {end - timedelta(days=1):%d/%m/%Y}"
         if not rows:
-            return f"Không có dữ liệu {label.lower()} từ {period_vi}."
+            where = f" của {scope}" if scope else ""
+            return f"Không có dữ liệu {label.lower()}{where} từ {period_vi}."
         if len(rows) == 1 and rows[0].get(metric_id) is not None:
             number = Decimal(str(rows[0][metric_id]))
             formatted = (
@@ -75,7 +76,9 @@ def factual(
     period = f"{start.isoformat()} to {(end - timedelta(days=1)).isoformat()}"
     label = vocab.metric_label(metric_id, "en")
     if not rows:
-        return f"No {label.lower()} records for {period}."
+        return (
+            f"No {label.lower()} records{f' ({scope})' if scope else ''} for {period}."
+        )
     if len(rows) == 1 and rows[0].get(metric_id) is not None:
         suffix = (
             " source currency"

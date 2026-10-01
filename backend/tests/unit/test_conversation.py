@@ -85,6 +85,13 @@ def test_vietnamese_summary_formats_actual_value_without_inventing_currency() ->
         "Canada",
     )
     assert filtered.startswith("Doanh thu của Canada từ 01/01/2023"), filtered
+    empty = factual(
+        "production_output", [], date(2024, 1, 1), date(2025, 1, 1), "vi", "Factory C"
+    )
+    assert (
+        empty
+        == "Không có dữ liệu sản lượng của Factory C từ 01/01/2024 đến 31/12/2024."
+    )
 
 
 def test_complete_comparisons_and_confirmations_do_not_require_date_templates() -> None:
