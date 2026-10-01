@@ -164,32 +164,33 @@ def build_transcript(
             },
         }
 
-    first = next((t for t in turns if not t.get("answer")), None)
-    start = next(
-        (
-            i
-            for i, s in enumerate(saved)
-            if first and s["question"] == first["question"]
-        ),
-        len(saved),
-    )
-    transcript = [answered(s) for s in saved[:start]]
-    position = start
-    for turn in turns:
-        if turn.get("answer"):
-            transcript.append(clarification(turn))
-            continue
-        match = next(
+    def find(turn: dict[str, str], start: int) -> int | None:
+        """The saved answer of this turn: same question, and the same text when the
+        turn kept one (remember_answer stores the first 400 characters)."""
+        said = turn.get("answer") or ""
+        return next(
             (
                 i
-                for i in range(position, len(saved))
+                for i in range(start, len(saved))
                 if saved[i]["question"] == turn["question"]
+                and (
+                    not said
+                    or (saved[i]["payload"].get("answer_text") or "")[:400] == said
+                )
             ),
             None,
         )
+
+    start = next((i for t in turns if (i := find(t, 0)) is not None), len(saved))
+    transcript = [answered(s) for s in saved[:start]]
+    position = start
+    for turn in turns:
+        match = find(turn, position)
         if match is not None:
             transcript += [answered(s) for s in saved[position : match + 1]]
             position = match + 1
+        elif turn.get("answer"):
+            transcript.append(clarification(turn))
     return transcript + [answered(s) for s in saved[position:]]
 
 

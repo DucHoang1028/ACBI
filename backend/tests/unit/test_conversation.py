@@ -230,6 +230,25 @@ def test_transcript_keeps_every_turn_in_order() -> None:
     assert build_transcript([], []) == []
 
 
+def test_a_remembered_answer_is_not_shown_again_as_a_clarification() -> None:
+    from app.history.service import build_transcript
+
+    text = "Doanh thu từ 31/05/2025 đến 29/06/2025: 49.005,84 đơn vị tiền tệ nguồn."
+    results = [
+        {"id": "r1", "question": "q1", "payload": {"answer_text": text}},
+        {"id": "r2", "question": "q2", "payload": {"answer_text": "x" * 500}},
+    ]
+    # remember_answer keeps each answer's text (cut to 400) in its turn.
+    turns = [
+        {"question": "q1", "answer": text},
+        {"question": "Doanh thu", "answer": "Kỳ nào?"},
+        {"question": "q2", "answer": "x" * 400},
+    ]
+    transcript = build_transcript(results, turns)
+    assert [t["question"] for t in transcript] == ["q1", "Doanh thu", "q2"]
+    assert [t["answer"].get("result_id") for t in transcript] == ["r1", None, "r2"]
+
+
 def test_unresolved_turn_keeps_earlier_slots() -> None:
     from app.query.orchestrator import carry_slots
 
