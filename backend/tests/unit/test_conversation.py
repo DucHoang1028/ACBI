@@ -75,6 +75,16 @@ def test_vietnamese_summary_formats_actual_value_without_inventing_currency() ->
     )
     assert "1.234.567,89" in summary and "31/03/2025" in summary
     assert "đơn vị tiền tệ nguồn" in summary and "VND" not in summary
+    # A filtered single value says what it was filtered to.
+    filtered = factual(
+        "revenue",
+        [{"revenue": "10", "sample_count": 2}],
+        date(2023, 1, 1),
+        date(2024, 1, 1),
+        "vi",
+        "Canada",
+    )
+    assert filtered.startswith("Doanh thu của Canada từ 01/01/2023"), filtered
 
 
 def test_complete_comparisons_and_confirmations_do_not_require_date_templates() -> None:

@@ -37,7 +37,7 @@ def factual(
     language: str = "en",
     scope: str = "",
 ) -> str:
-    """The plain summary; `scope` names a territory or factory filter on many rows."""
+    """The plain summary; `scope` names the territory or factory filter, if any."""
     vocab = vocabulary.get()
     ratio = metric_id in vocab.ratio_metrics()
     metric = vocab.metrics.get(metric_id)
@@ -63,7 +63,7 @@ def factual(
                     else " sản phẩm" if unit == "units" else ""
                 )
             )
-            who = named(rows[0], metric_id)
+            who = named(rows[0], metric_id) or scope
             return (
                 f"{label}{f' của {who}' if who else ''} từ {period_vi}: "
                 f"{formatted}{suffix}."
@@ -82,7 +82,7 @@ def factual(
             if unit == "source_currency"
             else " units" if unit == "units" else " ratio" if ratio else ""
         )
-        who = named(rows[0], metric_id)
+        who = named(rows[0], metric_id) or scope
         return (
             f"{label}{f' ({who})' if who else ''}: {rows[0][metric_id]}{suffix} "
             f"for {period}."
