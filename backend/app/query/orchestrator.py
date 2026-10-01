@@ -25,6 +25,7 @@ from app.conversation.dialogue import (
     small_talk,
 )
 from app.conversation.intent import (
+    MORE,
     WHICH,
     chosen_option,
     clarification_text,
@@ -32,6 +33,7 @@ from app.conversation.intent import (
     first_metric,
     first_task_text,
     follow_up_intent,
+    forecast_follow_up,
     is_scenario,
     local_comparison_intent,
     local_intent,
@@ -40,6 +42,7 @@ from app.conversation.intent import (
     next_deferred,
     resolve_corrections,
     resume_pending,
+    said_in,
     split_tasks,
     top_share_intent,
     unstick,
@@ -77,6 +80,7 @@ from app.presentation.analysis import (
     analysis_kind,
     analyze,
     fresh_request,
+    money,
     ratio_text,
 )
 from app.presentation.charts import TABLE, VizConfig, validate_viz
@@ -516,7 +520,20 @@ def run_forecast(
             "example “forecast revenue for the next 6 months”."
         )
     wanted = raw.horizon_months or named or 6
+    earlier = (prior or {}).get("slots") or {}
+    step = re.search(r"\b\d{1,2}\b", body.question)
+    if (
+        step
+        and re.search(MORE, fold(body.question))
+        and earlier.get("intent_type") == "forecast"
+        and earlier.get("metric_id") == metric
+        and earlier.get("horizon_months")
+    ):  # "thêm 3 tháng nữa": the forecast just given, three months longer
+        wanted = int(earlier["horizon_months"]) + int(step.group())
     horizon, capped = min(wanted, 12), wanted > 12
+    name = vocabulary.get().metric_label(metric, body.language).lower()
+    if scope := scope_of(intent):
+        name = f"{name} của {scope}" if vi else f"{name} for {scope}"
     try:
         if not contiguous(months):
             raise ForecastRefused("gaps")
@@ -550,10 +567,11 @@ def run_forecast(
             ),
         }[refusal.reason][0 if vi else 1]
         text_out = (
-            f"Tôi không đưa ra dự báo: {why} Bạn có thể xem xu hướng lịch sử thay thế."
+            f"Tôi không đưa ra dự báo {name}: {why} Bạn có thể xem xu hướng lịch sử "
+            "thay thế."
             if vi
-            else f"I am not offering a forecast: {why} You can look at the historical "
-            "trend instead."
+            else f"I am not offering a forecast of {name}: {why} You can look at the "
+            "historical trend instead."
         )
         return 200, response(
             "needs_clarification", text_out, request_id, conversation_id
@@ -582,16 +600,19 @@ def run_forecast(
     viz = validate_viz(
         VizConfig(type="line", x="month", y=["actual", "forecast"], series=None), table
     )
-    name = vocabulary.get().metric_label(metric, body.language).lower()
+
+    def figure(value: float) -> str:
+        return money(Decimal(value), body.language, 0)
+
     total = sum(result.values)
     first_m, last_m = future[0], future[-1]
     trend = (
         (
             f" Xu hướng {'tăng' if result.slope >= 0 else 'giảm'} khoảng "
-            f"{abs(result.slope):,.0f} mỗi tháng."
+            f"{figure(abs(result.slope))} mỗi tháng."
             if vi
             else f" The trend is {'up' if result.slope >= 0 else 'down'} about "
-            f"{abs(result.slope):,.0f} per month."
+            f"{figure(abs(result.slope))} per month."
         )
         if result.method == "linear_trend"
         else ""
@@ -607,14 +628,15 @@ def run_forecast(
     )
     answer_text = (
         f"Dự báo, không phải số liệu đã ghi nhận: {name} từ {first_m:%m/%Y} đến "
-        f"{last_m:%m/%Y}{cap_note} khoảng {total:,.0f} tổng cộng, mỗi tháng trong "
-        f"khoảng {min(result.lower):,.0f} đến {max(result.upper):,.0f} (tin cậy 95%)."
+        f"{last_m:%m/%Y}{cap_note} khoảng {figure(total)} tổng cộng, mỗi tháng trong "
+        f"khoảng {figure(min(result.lower))} đến {figure(max(result.upper))} "
+        "(tin cậy 95%)."
         f"{trend} Dùng {method} trên {result.history_months} tháng đã ghi nhận; sai số "
         f"kiểm thử trên 6 tháng gần nhất là {result.backtest_mape * 100:.0f}%."
         if vi
         else f"Forecast, not recorded data: {name} from {first_m:%Y-%m} to "
-        f"{last_m:%Y-%m}{cap_note} about {total:,.0f} in total, each month between "
-        f"{min(result.lower):,.0f} and {max(result.upper):,.0f} (95% interval)."
+        f"{last_m:%Y-%m}{cap_note} about {figure(total)} in total, each month between "
+        f"{figure(min(result.lower))} and {figure(max(result.upper))} (95% interval)."
         f"{trend} Uses {method} on {result.history_months} recorded months; the error "
         f"on the last 6 months was {result.backtest_mape * 100:.0f}%."
     )
@@ -886,18 +908,29 @@ def answer(
         parts.append(part)
         if part["status"] == "technical_failure":
             break
+    # Only requests that did not run are left for later ("tiếp đi"); the ones run
+    # here must not come back.
     if kept is not None and first["status"] == "needs_clarification":
         # The first request is still waiting for its answer: put its state back.
         save_context(
             storage,
             first["conversation_id"],
             uid,
-            kept["slots"],
+            {**kept["slots"], "deferred_requests": queue},
             kept["pending_question"],
             kept["turns"],
         )
     else:
         first["conversation_id"] = conversation
+        if last := get_context(storage, conversation, uid):
+            save_context(
+                storage,
+                conversation,
+                uid,
+                {**last["slots"], "deferred_requests": queue},
+                last["pending_question"],
+                last["turns"],
+            )
     head = carry.get("head") or first_clause(body.question)
     first["title"] = f"1. {head[:1].upper()}{head[1:]}"
     first["parts"] = parts
@@ -1140,7 +1173,14 @@ def answer_one(
         if later:
             raw = raw.model_copy(update={"deferred_requests": waiting})
         else:
-            extra = raw.deferred_requests or tasks[1:]
+            # The model may copy a request it saw in the context; keep only what this
+            # message (or the options it answers) actually asks.
+            message = f"{body.question} {(prior or {}).get('pending_question') or ''}"
+            extra = [t for t in raw.deferred_requests if said_in(t, message)] or tasks[
+                1:
+            ]
+            if extra != raw.deferred_requests:
+                raw = raw.model_copy(update={"deferred_requests": extra})
             if extra:  # several tasks: run the first one, list the rest
                 update: dict[str, Any] = {"deferred_requests": extra}
                 if raw.intent_type in DATA_KINDS and (
@@ -1155,6 +1195,10 @@ def answer_one(
                     )
                 raw = raw.model_copy(update=update)
         raw = resume_pending(raw, prior)
+        if not canned and (
+            again := forecast_follow_up(first, raw, (prior or {}).get("slots") or {})
+        ):
+            raw = again.model_copy(update={"deferred_requests": raw.deferred_requests})
         # From here on the question is the first request alone: what it says about
         # periods, chart types or breakdowns is not read from the others.
         head = (
@@ -1187,7 +1231,11 @@ def answer_one(
         if raw.intent_type == "forecast" and not comparing:
             # "Was that based on total revenue?" names no period of its own:
             # it asks about the forecast just given, so do not compute again.
-            repeated = not mentions_time(body.question) and (
+            # "Còn Pháp thì sao" names a place instead: that is a new forecast.
+            repeated = (
+                not mentions_time(body.question)
+                and not vocabulary.get().match_members(fold(body.question))
+            ) and (
                 (
                     (
                         latest_in_conversation(

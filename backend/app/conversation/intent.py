@@ -227,7 +227,7 @@ SINGULAR_REF = (
 def _those_members(
     current: dict[str, Any], slots: dict[str, Any], intent: Intent, question: str
 ) -> None:
-    """"Those regions" (all shown) or "that one"/"của nó" (the top one shown)."""
+    """ "Those regions" (all shown) or "that one"/"của nó" (the top one shown)."""
     value = fold(question)
     plural = bool(re.search(PLURAL_REF, value))
     if not (plural or re.search(SINGULAR_REF, value)):
@@ -999,6 +999,52 @@ def split_tasks(question: str) -> list[str]:
 
         tasks = [f"{t} {phrase}" if shares(t) else t for t in tasks[:-1]] + tasks[-1:]
     return tasks[:9]
+
+
+def said_in(request: str, message: str) -> bool:
+    """A later request the model lists must come from this message, not the history."""
+    words = re.findall(r"\w+", fold(request))
+    said = set(re.findall(r"\w+", fold(message)))
+    return bool(words) and 2 * sum(w in said for w in words) >= len(words)
+
+
+MORE = r"\b(?:them|more|another|further|extra)\b"
+
+
+def forecast_follow_up(
+    question: str, raw: Intent, slots: dict[str, Any]
+) -> Intent | None:
+    """ "Còn Pháp thì sao", "thêm 3 tháng nữa" right after a forecast: forecast again.
+
+    The model can read such a short reply as a question about the data. Only a reply
+    that names no metric and no past period continues the forecast."""
+    value = fold(question)
+    if (
+        raw.intent_type == "forecast"
+        or slots.get("intent_type") != "forecast"
+        or not (re.search(FOLLOW_UP, value) or re.search(MORE, value))
+        or re.search(r"\b20\d{2}\b", value)
+        or re.search(RELATIVE_PERIOD, value)
+        or vocabulary.get().match_metrics(value)
+    ):
+        return None
+    follow = follow_up_intent(question, slots)
+    if follow is None:
+        return None
+    named = follow.territory or follow.factory_id
+    if not named and not re.search(MORE, value):
+        return None
+    return follow.model_copy(
+        update={
+            "intent_type": "forecast",
+            "metric_id": slots.get("metric_id"),
+            "territory": follow.territory
+            or (None if named else slots.get("territory")),
+            "factory_id": follow.factory_id
+            or (None if named else slots.get("factory_id")),
+            "horizon_months": slots.get("horizon_months"),
+        }
+    )
 
 
 def further_requests(question: str) -> list[str]:
