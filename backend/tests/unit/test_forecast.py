@@ -1,31 +1,70 @@
 """The forecast is arithmetic on recorded months; weak history is refused."""
 
+import math
+import random
 from datetime import date
 
 import pytest
 from app.core.dates import resolve_period
 from app.query.forecast import (
+    Fit,
     ForecastRefused,
+    Spec,
     contiguous,
+    initial_states,
     make_forecast,
     next_months,
+    run,
+    select,
 )
+
+SEASONAL = [
+    1000 + 300 * math.sin(2 * math.pi * t / 12) + 20 * t + (37 * t % 11) * 5
+    for t in range(36)
+]
 
 
 def test_a_straight_line_is_extrapolated_exactly() -> None:
     history = [100.0 + 10 * t for t in range(30)]
     result = make_forecast(history, 3, 24, 0.35)
-    assert result.method == "linear_trend"
+    assert result.method == "ETS(A,A,N)"  # Holt's linear trend
     assert result.values == pytest.approx([400.0, 410.0, 420.0])
     assert result.backtest_mape == pytest.approx(0.0, abs=1e-9)
     assert result.upper[0] == pytest.approx(result.lower[0], abs=1e-6)
+    assert result.slope == pytest.approx(10.0)
+
+
+def test_the_recursions_match_statsmodels() -> None:
+    # statsmodels 0.15 ETSModel(error="add", trend="add", damped_trend=True,
+    # seasonal="add", seasonal_periods=12, initialization_method="heuristic")
+    # .smooth([0.3, 0.05, 0.1, 0.9]).forecast(3) on the same series.
+    spec = Spec("Ad", "A")
+    params = {"alpha": 0.3, "beta": 0.05, "gamma": 0.1, "phi": 0.9}
+    sse, level, trend, seasons = run(SEASONAL, params, initial_states(SEASONAL, spec))
+    fitted = Fit(spec, params, sse, 36, level, trend, tuple(seasons))
+    assert fitted.point(3) == pytest.approx(
+        [1716.184458, 1874.899065, 1992.866083], abs=1e-5
+    )
+
+
+def test_a_clear_yearly_season_is_modelled() -> None:
+    assert select(SEASONAL).spec.season == "A"
+    result = make_forecast(SEASONAL, 12, 24, 0.35)
+    assert result.method.endswith(",A)")
+    peak, trough = result.values.index(max(result.values)), result.values.index(
+        min(result.values)
+    )
+    assert abs(peak - trough) == 6  # the season repeats: high and low half a year apart
+    widths = [u - lo for u, lo in zip(result.upper, result.lower)]
+    assert widths == sorted(widths)  # uncertainty grows with the horizon
 
 
 def test_short_or_erratic_history_is_refused() -> None:
     with pytest.raises(ForecastRefused) as short:
         make_forecast([1.0] * 10, 3, 24, 0.35)
     assert short.value.reason == "history"
-    erratic = [100.0, 900.0] * 15
+    noise = random.Random(7)
+    erratic = [noise.uniform(10, 1000) for _ in range(30)]
     with pytest.raises(ForecastRefused) as wild:
         make_forecast(erratic, 3, 24, 0.35)
     assert wild.value.reason == "error"

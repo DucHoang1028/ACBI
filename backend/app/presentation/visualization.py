@@ -124,6 +124,17 @@ def reshaped(
             )
         except ValueError:
             pass
+    if kind != "kpi_card":
+        try:  # one value and nothing to group it by: a card is its chart
+            return auto_viz("kpi_card", rows).model_dump(), (
+                f"Kết quả chỉ có một giá trị nên không vẽ được {names[kind]}; tôi "
+                "hiển thị dạng thẻ KPI."
+                if vi
+                else f"The result is a single value, which a {names[kind]} cannot "
+                "show, so I am showing a KPI card."
+            )
+        except ValueError:
+            pass
     hint = {
         "stacked_bar": (
             " Cột chồng cần hai chiều, ví dụ: doanh thu theo tháng và khu vực "

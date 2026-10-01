@@ -58,9 +58,11 @@ from app.core.dates import (
     COMPARE_WORDS,
     FORMAT_REQUEST,
     GROWTH,
+    RELATIVE_NAMES,
     WHY,
     Period,
     compares_two_periods,
+    conflicting_periods,
     conflicting_years,
     date_hints,
     impossible_date,
@@ -136,6 +138,17 @@ RANKING_WORDS = (
     r"\b(?:xep hang|rank\w*|tang truong|growth|nhanh nhat|manh nhat|fastest)\b"
 )
 DATA_KINDS = {"metric_query", "comparison", "trend", "ranking", "needs_clarification"}
+METHODS = {  # forecast models, in words
+    "ETS(A,N,N)": ("làm trơn hàm mũ đơn giản", "simple exponential smoothing"),
+    "ETS(A,A,N)": ("phương pháp Holt, xu hướng tuyến tính", "Holt's linear trend"),
+    "ETS(A,Ad,N)": ("phương pháp Holt, xu hướng tắt dần", "Holt's damped trend"),
+    "ETS(A,N,A)": (
+        "làm trơn hàm mũ có mùa vụ 12 tháng",
+        "exponential smoothing with a 12-month season",
+    ),
+    "ETS(A,A,A)": ("Holt-Winters cộng tính", "additive Holt-Winters"),
+    "ETS(A,Ad,A)": ("Holt-Winters cộng tính, xu hướng tắt dần", "damped Holt-Winters"),
+}
 
 
 def run_query(
@@ -544,6 +557,8 @@ def run_forecast(
         facts = refusal.facts
         miss = float(facts.get("mape", 0)) * 100
         limit = float(facts.get("limit", 0)) * 100
+        # A month with almost no sales makes the percentage meaningless beyond 100.
+        missed = f"{miss:.0f}%" if miss <= 100 else ("hơn 100%" if vi else "over 100%")
         why = {
             "history": (
                 f"Chỉ có {facts.get('have')} tháng lịch sử đầy đủ, cần ít nhất "
@@ -552,9 +567,9 @@ def run_forecast(
                 f"{facts.get('need')} are needed.",
             ),
             "error": (
-                f"Phương pháp tốt nhất vẫn lệch {miss:.0f}% khi kiểm thử trên 6 tháng "
+                f"Mô hình được chọn vẫn lệch {missed} khi kiểm thử trên 6 tháng "
                 f"gần nhất (ngưỡng {limit:.0f}%), nên số dự báo không đáng tin.",
-                f"Even the best method missed the last 6 months by {miss:.0f}% "
+                f"The chosen model missed the last 6 months by {missed} "
                 f"(limit {limit:.0f}%), so a forecast is not reliable.",
             ),
             "gaps": (
@@ -606,21 +621,19 @@ def run_forecast(
 
     total = sum(result.values)
     first_m, last_m = future[0], future[-1]
+    damped = ",Ad," in result.method
     trend = (
         (
-            f" Xu hướng {'tăng' if result.slope >= 0 else 'giảm'} khoảng "
-            f"{figure(abs(result.slope))} mỗi tháng."
+            f" Xu hướng hiện tại {'tăng' if result.slope >= 0 else 'giảm'} khoảng "
+            f"{figure(abs(result.slope))} mỗi tháng{' và chậm dần' if damped else ''}."
             if vi
-            else f" The trend is {'up' if result.slope >= 0 else 'down'} about "
-            f"{figure(abs(result.slope))} per month."
+            else f" The current trend is {'up' if result.slope >= 0 else 'down'} about "
+            f"{figure(abs(result.slope))} per month{', fading' if damped else ''}."
         )
-        if result.method == "linear_trend"
+        if ",N," not in result.method
         else ""
     )
-    method = {
-        "linear_trend": ("đường xu hướng tuyến tính", "a straight-line trend"),
-        "recent_average": ("trung bình 6 tháng gần nhất", "the last-six-month average"),
-    }[result.method][0 if vi else 1]
+    method = f"{result.method}, {METHODS[result.method][0 if vi else 1]}"
     cap_note = (
         (" (đã giới hạn 12 tháng)" if vi else " (limited to 12 months)")
         if capped
@@ -631,14 +644,15 @@ def run_forecast(
         f"{last_m:%m/%Y}{cap_note} khoảng {figure(total)} tổng cộng, mỗi tháng trong "
         f"khoảng {figure(min(result.lower))} đến {figure(max(result.upper))} "
         "(tin cậy 95%)."
-        f"{trend} Dùng {method} trên {result.history_months} tháng đã ghi nhận; sai số "
-        f"kiểm thử trên 6 tháng gần nhất là {result.backtest_mape * 100:.0f}%."
+        f"{trend} Mô hình {method}, chọn theo AICc trên {result.history_months} tháng "
+        "đã ghi nhận; sai số kiểm thử trên 6 tháng gần nhất là "
+        f"{result.backtest_mape * 100:.0f}%."
         if vi
         else f"Forecast, not recorded data: {name} from {first_m:%Y-%m} to "
         f"{last_m:%Y-%m}{cap_note} about {figure(total)} in total, each month between "
         f"{figure(min(result.lower))} and {figure(max(result.upper))} (95% interval)."
-        f"{trend} Uses {method} on {result.history_months} recorded months; the error "
-        f"on the last 6 months was {result.backtest_mape * 100:.0f}%."
+        f"{trend} Model {method}, chosen by AICc on {result.history_months} recorded "
+        f"months; the error on the last 6 months was {result.backtest_mape * 100:.0f}%."
     )
     payload = response("ok", "Results found", request_id, conversation_id)
     payload.update(
@@ -666,7 +680,7 @@ def run_forecast(
                 "history_window": [start.isoformat(), end.isoformat()],
                 "horizon_months": horizon,
                 "backtest_mape": round(result.backtest_mape, 4),
-                "interval": "point forecast ± 1.96 x residual sigma",
+                "interval": "ETS analytical 95% prediction interval",
                 "residual_sigma": round(result.residual_std, 2),
             },
         },
@@ -1334,14 +1348,20 @@ def answer_one(
                 next_turns(prior, body.question, question),
             )
             return 200, response(outcome, question, request_id, conversation_id)
-        if not comparing and (clash := conflicting_years(body.question)):
+        clash = [] if comparing else conflicting_years(body.question)
+        relative = [] if comparing or clash else conflicting_periods(body.question)
+        if clash or relative:
             outcome = "needs_clarification"
+            vi = body.language == "vi"
+            both: list[str] = (
+                [f"năm {y}" if vi else y for y in clash[:2]]
+                if clash
+                else [RELATIVE_NAMES[k][0 if vi else 1] for k in relative[:2]]
+            )
             question = (
-                f"Bạn nhắc tới cả năm {clash[0]} và năm {clash[1]}. "
-                "Bạn muốn xem năm nào?"
-                if body.language == "vi"
-                else f"You mention both {clash[0]} and {clash[1]}. "
-                "Which year do you mean?"
+                f"Bạn nhắc tới cả {both[0]} và {both[1]}. Bạn muốn xem kỳ nào?"
+                if vi
+                else f"You mention both {both[0]} and {both[1]}. Which do you mean?"
             )
             save_context(
                 storage,

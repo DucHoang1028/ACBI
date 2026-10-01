@@ -11,7 +11,7 @@ The proposal's eight backend responsibilities are retained: Query Orchestration,
 | Conversation Management | `conversation/service.py` (slots, turns, pending clarification), `conversation/intent.py` (merge context, validate factory, territory and breakdown choices), `conversation/dialogue.py` (grounded answers about the data and small talk) |
 | AI Integration | `ai/client.py` (`LLMClient`, `GroqClient`, `FakeLLM`), `ai/keys.py` (key pool and failover), `ai/budget.py` (`RequestBudget`), `ai/stt.py` |
 | Business Metadata and Retrieval | `metadata/` (dictionary, `vocabulary.py` names, synonyms and members from the dictionary and the data, scoped BM25 retriever) |
-| Query Processing | `query/builder.py` (approved templates), `query/validation.py` (shared sqlglot gate), `query/forecast.py` (labelled trend forecast, refusable) |
+| Query Processing | `query/builder.py` (approved templates), `query/validation.py` (shared sqlglot gate), `query/forecast.py` (labelled ETS exponential-smoothing forecast, refusable) |
 | Result Presentation | `presentation/charts.py` (config validation), `presentation/visualization.py` (AI proposal loop, named chart types), `presentation/summary.py`, `presentation/analysis.py` (comparisons and highlights computed from rows), `presentation/messages.py` (no raw internal errors), `presentation/contract.py` (response contract) |
 | History and Audit | `history/service.py` (saved results, transcript, `access_audit`), `api/history.py` |
 

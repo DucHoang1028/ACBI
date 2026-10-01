@@ -1012,3 +1012,38 @@ def test_carry_slots_drops_territory_that_does_not_fit_the_new_metric() -> None:
     assert next_slots["metric_id"] == "production_output"
     assert "territory" not in next_slots
     assert "dimension" not in next_slots
+
+
+def test_two_periods_of_one_kind_with_nothing_joining_them_are_asked_about() -> None:
+    from app.core.dates import conflicting_periods
+
+    assert conflicting_periods("doanh thu tháng này nhưng của tháng trước") == [
+        "this_month",
+        "last_month",
+    ]
+    assert conflicting_periods("revenue this quarter but last quarter") == [
+        "this_quarter",
+        "last_quarter",
+    ]
+    assert conflicting_periods("doanh thu hôm nay hôm qua") == ["today", "yesterday"]
+    for fine in (
+        "Doanh thu hôm qua",
+        "Doanh thu hôm nay",
+        "Doanh thu tháng này",
+        "Doanh thu tháng này so với tháng trước",
+        "doanh thu tháng này và tháng trước",
+        "doanh thu tháng này hơn tháng trước bao nhiêu",
+        "doanh thu tháng này năm ngoái",  # one month of an earlier year
+        "revenue this month vs last month",
+    ):
+        assert conflicting_periods(fine) == [], fine
+
+
+def test_a_chart_asked_for_a_single_value_becomes_a_kpi_card() -> None:
+    from app.presentation.visualization import reshaped
+
+    viz, note = reshaped("bar", [{"revenue": "1529643.58", "sample_count": 811}], "vi")
+    assert viz["type"] == "kpi_card"
+    assert "thẻ KPI" in note
+    many = [{"territory": t, "revenue": "10"} for t in ("A", "B")]
+    assert reshaped("bar", many, "vi")[0]["type"] == "bar"

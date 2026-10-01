@@ -348,3 +348,36 @@ def test_a_vietnamese_forecast_writes_numbers_and_scope_the_vietnamese_way(
     assert "Germany" in text
     assert re.search(r"\d\.\d{3}", text), text  # 1.234.567, as in the table
     assert not re.search(r"\d,\d{3}\b", text), text  # never 1,234,567
+    assert "ETS(A,A,N)" in text and "AICc" in text  # the model is named
+
+
+def test_a_refusal_names_the_scope_and_never_a_silly_percentage(
+    monkeypatch: Any,
+) -> None:
+    patch_storage(monkeypatch)
+
+    def last_month_almost_empty(engine: object, plan: Any, budget: object) -> Any:
+        rows = fake_run_query(engine, plan, budget)
+        rows[-1][plan.metric_id] = "3.00"  # a few dollars of stray orders
+        return rows
+
+    monkeypatch.setattr(orchestrator, "run_query", last_month_almost_empty)
+    question = "Dự báo doanh thu của Central 3 tháng tới"
+    llm = FakeLLM(
+        {
+            question: intent(
+                metric_id="revenue",
+                intent_type="forecast",
+                territory="Central",
+                horizon_months=3,
+            )
+        }
+    )
+
+    _, result = orchestrator.answer_one(
+        AskRequest(question=question, language="vi"), USER, make_state(llm)
+    )
+
+    assert result["status"] == "needs_clarification"
+    assert "doanh thu của Central" in result["message"]
+    assert "hơn 100%" in result["message"], result["message"]

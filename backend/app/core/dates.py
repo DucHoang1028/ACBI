@@ -6,6 +6,33 @@ from datetime import date, timedelta
 from app.core.text import fold
 from app.metadata import vocabulary
 
+RELATIVE = {
+    "today": r"\b(?:hom nay|today)\b",
+    "yesterday": r"\b(?:hom qua|yesterday)\b",
+    "this_week": r"\b(?:tuan nay|this week)\b",
+    "last_week": r"\b(?:tuan (?:truoc|ngoai|vua roi|vua qua)|last week)\b",
+    "this_month": r"\b(?:thang nay|this month)\b",
+    "last_month": r"\b(?:thang (?:truoc|ngoai|vua roi|vua qua)|last month)\b",
+    "this_quarter": r"\b(?:quy nay|this quarter)\b",
+    "last_quarter": r"\b(?:quy (?:truoc|ngoai|vua roi|vua qua)|last quarter)\b",
+    "this_year": r"\b(?:nam nay|this year)\b",
+    "last_year": r"\b(?:nam (?:truoc|ngoai|vua roi|vua qua)|last year)\b",
+}
+RELATIVE_NAMES = {
+    "today": ("hôm nay", "today"),
+    "yesterday": ("hôm qua", "yesterday"),
+    "this_week": ("tuần này", "this week"),
+    "last_week": ("tuần trước", "last week"),
+    "this_month": ("tháng này", "this month"),
+    "last_month": ("tháng trước", "last month"),
+    "this_quarter": ("quý này", "this quarter"),
+    "last_quarter": ("quý trước", "last quarter"),
+    "this_year": ("năm nay", "this year"),
+    "last_year": ("năm trước", "last year"),
+}
+# Words that say what a message does with two periods: a list, a range, a comparison.
+JOINED = r"\b(?:va|and|den|toi|to|vs|so|voi|tu|from|giua|between|ca|hon|than)\b|[,;/-]"
+
 
 def date_hints(question: str) -> dict[str, str | None]:
     """Resolve only unambiguous calendar wording; leave comparisons to the model."""
@@ -14,19 +41,7 @@ def date_hints(question: str) -> dict[str, str | None]:
     # anchor: the model resolves it against context.data_as_of.
     if re.search(r"\b(?:den nay|toi nay|den gio|to now|until now|to date)\b", value):
         return {}
-    aliases = {
-        "today": r"\b(?:hom nay|today)\b",
-        "yesterday": r"\b(?:hom qua|yesterday)\b",
-        "this_week": r"\b(?:tuan nay|this week)\b",
-        "last_week": r"\b(?:tuan (?:truoc|ngoai|vua roi|vua qua)|last week)\b",
-        "this_month": r"\b(?:thang nay|this month)\b",
-        "last_month": r"\b(?:thang (?:truoc|ngoai|vua roi|vua qua)|last month)\b",
-        "this_quarter": r"\b(?:quy nay|this quarter)\b",
-        "last_quarter": r"\b(?:quy (?:truoc|ngoai|vua roi|vua qua)|last quarter)\b",
-        "this_year": r"\b(?:nam nay|this year)\b",
-        "last_year": r"\b(?:nam (?:truoc|ngoai|vua roi|vua qua)|last year)\b",
-    }
-    found = [key for key, pattern in aliases.items() if re.search(pattern, value)]
+    found = [key for key, pattern in RELATIVE.items() if re.search(pattern, value)]
     if len(found) == 1 and not re.search(r"\b\d{4}\b", value):
         return {"period": found[0], "start_date": None, "end_date": None}
     # Anchor complete, single month/quarter references without interpreting ranges.
@@ -287,10 +302,24 @@ def conflicting_years(question: str) -> list[str]:
     what it does with them, so only the bare clash is reported."""
     value = fold(question)
     years = sorted(set(re.findall(r"(?<!\d)(20\d{2})(?!\d)", value)))
-    joined = re.search(
-        r"\b(?:va|and|den|toi|to|vs|so|voi|tu|from|giua|between|ca)\b|[,;/-]", value
-    )
-    return years if len(years) >= 2 and not joined else []
+    return years if len(years) >= 2 and not re.search(JOINED, value) else []
+
+
+def conflicting_periods(question: str) -> list[str]:
+    """Two relative periods of one kind with nothing joining them.
+
+    "Doanh thu tháng này nhưng của tháng trước" may mean either month. "Tháng này
+    năm ngoái" names one month of an earlier year, so it is no clash."""
+    value = fold(question)
+    if re.search(JOINED, value) or re.search(COMPARE_WORDS, value):
+        return []
+    found = [key for key, pattern in RELATIVE.items() if re.search(pattern, value)]
+    unit = {key: key.split("_")[1] if "_" in key else "day" for key in found}
+    for kind in set(unit.values()):
+        same = [k for k in found if unit[k] == kind]
+        if len(same) >= 2:
+            return same
+    return []
 
 
 def compares_two_periods(question: str) -> bool:
