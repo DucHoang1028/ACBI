@@ -888,7 +888,7 @@ def test_the_three_largest_are_kept_and_a_ratio_is_stated() -> None:
         "Doanh thu của Bikes so với Accessories là bao nhiêu lần?",
         "vi",
     )
-    assert said is not None and said.startswith("Bikes gấp 50,0 lần Accessories")
+    assert said is not None and said.startswith("Bikes gấp 50,00 lần Accessories")
 
 
 def test_the_last_n_days_are_set_against_the_n_days_before() -> None:

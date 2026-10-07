@@ -1083,3 +1083,23 @@ def test_a_chart_asked_for_a_single_value_becomes_a_kpi_card() -> None:
     assert "thẻ KPI" in note
     many = [{"territory": t, "revenue": "10"} for t in ("A", "B")]
     assert reshaped("bar", many, "vi")[0]["type"] == "bar"
+
+
+def test_two_factories_named_are_compared_not_filtered_to_the_first() -> None:
+    question = "so sánh sản lượng của Factory A với Factory B năm 2024"
+    raw = intent(
+        metric_id="production_output",
+        dimension="factory",
+        factory_id=1,
+        period="explicit",
+        start_date="2024-01-01",
+        end_date="2025-01-01",
+        needs_clarification=False,
+        missing_fields=[],
+    )
+    merged = merged_intent(raw, None, question)
+    assert (merged.dimension, merged.factory_id) == ("factory", None)
+    one = merged_intent(
+        raw.model_copy(update={"dimension": "none"}), None, "sản lượng Factory A 2024"
+    )
+    assert one.factory_id == 1

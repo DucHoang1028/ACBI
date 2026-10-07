@@ -437,6 +437,10 @@ def merged_intent(
             clarification_question=None,
             missing_fields=[],
         )
+    named = vocabulary.get().match_members(fold(question)).get("factory", [])
+    if len(named) > 1 and current.get("dimension") in ("none", "factory"):
+        # "Factory A với Factory B": one row per factory, not a filter to the first.
+        current.update(dimension="factory", factory_id=None)
     unknown = _unknown_choice(current, question)
     if unknown:
         current.update(

@@ -70,9 +70,9 @@ def ratio_text(
     if len(at) != 2 or at[1][2] == 0:
         return None
     (_, first, a), (_, second, b) = at
-    times = f"{a / b:,.1f}".replace(",", "_").replace(".", ",").replace("_", ".")
+    times = f"{a / b:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
     if language != "vi":
-        times = f"{a / b:,.1f}"
+        times = f"{a / b:,.2f}"
     return (
         f"{first} gấp {times} lần {second} ({amount(a, metric, language)} so với "
         f"{amount(b, metric, language)})."
