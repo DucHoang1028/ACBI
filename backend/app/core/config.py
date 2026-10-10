@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash,gemini-3.6-flash"
     literouter_api_key: SecretStr = SecretStr("")
     literouter_model: str = "deepseek-v3.2:free"
+    # A model served on this machine by Ollama (for example http://localhost:11434);
+    # empty keeps it off. Add "ollama" to LLM_PROVIDER_ORDER to use it in turn.
+    ollama_url: str = ""
+    ollama_model: str = "qwen2.5:7b-instruct"
     # Demo only: one-click sign-in without a password (see /api/auth/demo-login).
     demo_login_enabled: bool = False
     stt_model: str = "whisper-large-v3-turbo"
@@ -66,8 +70,13 @@ class Settings(BaseSettings):
         return value
 
     def has_llm_keys(self) -> bool:
-        """True when any provider (Gemini, Groq or LiteRouter) has a key."""
-        return bool(self.gemini_keys() or self.groq_keys() or self.literouter_keys())
+        """True when any provider (Gemini, Groq, LiteRouter or Ollama) can be used."""
+        return bool(
+            self.gemini_keys()
+            or self.groq_keys()
+            or self.literouter_keys()
+            or self.ollama_url
+        )
 
     def gemini_keys(self) -> list[str]:
         raw = self.gemini_api_keys.get_secret_value().split(",")

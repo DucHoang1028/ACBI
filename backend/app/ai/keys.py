@@ -27,6 +27,8 @@ class KeyState:
     json_object: bool = False  # no strict schemas: the schema goes in the prompt
     extra: dict[str, object] = field(default_factory=dict)
     gap: float = 0.0  # least seconds between two calls on this key
+    provider: str = ""  # gemini, groq, literouter, ollama
+    timeout: float = 0.0  # seconds one call may take; 0 keeps the default
 
 
 class KeyPool:
@@ -49,10 +51,11 @@ class KeyPool:
     def __len__(self) -> int:
         return len(self.states)
 
-    def available(self, estimated: int) -> list[KeyState]:
+    def available(self, estimated: int, provider: str | None = None) -> list[KeyState]:
         """Usable keys, the current one first; each has room in its local window."""
         now = time.monotonic()
         ordered = self.states[self.current :] + self.states[: self.current]
+        ordered = [s for s in ordered if provider in (None, s.provider)]
         usable: list[KeyState] = []
         with self.lock:
             for state in ordered:
@@ -68,12 +71,14 @@ class KeyPool:
                     usable.append(state)
         return usable
 
-    def wait_time(self, estimated: int) -> float:
+    def wait_time(self, estimated: int, provider: str | None = None) -> float:
         """Seconds until some key has room again (infinite if none ever will)."""
         now = time.monotonic()
         best = float("inf")
         with self.lock:
             for state in self.states:
+                if provider not in (None, state.provider):
+                    continue
                 moments = [state.rest_until, *(at + 60 for at, _ in state.calls)]
                 paused = state.calls[-1][0] + state.gap if state.calls else 0.0
                 moments.append(paused)  # the pause between two calls on one key

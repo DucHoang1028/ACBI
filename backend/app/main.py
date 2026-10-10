@@ -18,6 +18,7 @@ from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
 from app.api.chat import router as chat_router
 from app.api.history import router as history_router
+from app.api.llm import router as llm_router
 from app.api.voice import router as voice_router
 from app.auth.service import migrate
 from app.conversation.service import migrate as migrate_chat
@@ -118,6 +119,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="ACBI Phase 4", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(chat_router)
+app.include_router(llm_router)
 app.include_router(history_router)
 app.include_router(voice_router)
 app.include_router(admin_router)

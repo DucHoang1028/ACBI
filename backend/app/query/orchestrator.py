@@ -925,6 +925,7 @@ def answer(
                     question=task[:1000],
                     conversation_id=conversation if known else None,
                     language=body.language,
+                    llm_provider=body.llm_provider,
                 ),
                 user,
                 state,
@@ -1014,6 +1015,8 @@ def answer_one(
                 request_id,
                 conversation_id,
             )
+        listed = {p["id"] for p in getattr(client, "status", lambda: [])()}
+        budget.provider = body.llm_provider if body.llm_provider in listed else None
         anchor = date.fromisoformat(state.readiness["data_as_of"])
         target = reshape_kind(body.question)
         follow = None if target else analysis_kind(body.question)

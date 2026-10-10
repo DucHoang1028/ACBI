@@ -4,6 +4,7 @@
 import json
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Protocol, TypeVar
 
 import httpx
@@ -291,6 +292,8 @@ def provider_keys(settings: Settings) -> list[KeyState]:
         settings.llm_requests_per_minute,
         settings.llm_tokens_per_minute,
     ).states
+    for state in groq:
+        state.provider = "groq"
     states: list[KeyState] = []
     for provider in settings.llm_provider_order.split(","):
         name = provider.strip().lower()
@@ -309,6 +312,7 @@ def provider_keys(settings: Settings) -> list[KeyState]:
                     model=model,
                     json_object=True,
                     extra={"reasoning_effort": "none"},
+                    provider="gemini",
                 )
                 for model in models
                 for i, key in enumerate(settings.gemini_keys(), 1)
@@ -324,9 +328,24 @@ def provider_keys(settings: Settings) -> list[KeyState]:
                     url=LITEROUTER_URL,
                     model=settings.literouter_model,
                     json_object=True,
+                    provider="literouter",
                 )
                 for key in settings.literouter_keys()
             ]
+        elif name == "ollama" and settings.ollama_url:
+            states.append(
+                KeyState(
+                    key="ollama",  # a local server needs no key; this is only a label
+                    label="ollama",
+                    rpm=60,
+                    tpm=10_000_000,
+                    url=settings.ollama_url.rstrip("/") + "/v1",
+                    model=settings.ollama_model,
+                    json_object=True,
+                    provider="ollama",
+                    timeout=180.0,  # a local model on a small GPU is slow, not down
+                )
+            )
     return states
 
 
@@ -597,6 +616,44 @@ class GroqClient:
             max_tokens=700,
         ).text
 
+    def status(self) -> list[dict[str, Any]]:
+        return _status_of(self)
+
+    def probe(self, provider: str) -> None:
+        """One tiny call per key of a provider, to learn which ones work again."""
+        states = [s for s in self.pool.states if s.provider == provider]
+
+        def ping(state: KeyState) -> None:
+            body = {
+                "model": state.model or self.model,
+                "messages": [{"role": "user", "content": "ok"}],
+                "max_tokens": 1,
+                **state.extra,
+            }
+            try:
+                with httpx.Client(timeout=state.timeout or 15) as client:
+                    response = client.post(
+                        f"{state.url or GROQ_URL}/chat/completions",
+                        headers={"Authorization": f"Bearer {state.key}"},
+                        json=body,
+                    )
+                response.raise_for_status()
+                state.rest_until = 0.0
+            except httpx.HTTPStatusError as failure:
+                said = failure.response.text
+                status = failure.response.status_code
+                after = _retry_after(failure.response.headers)
+                if status == 403 and "rate limit" in said.lower():
+                    status, after = 429, after or state.gap or None
+                if status == 429 and "PerDay" in said:
+                    after = 3600.0
+                self.pool.failed(state, status, after)
+            except httpx.TransportError:
+                self.pool.failed(state, None, None)
+
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            list(pool.map(ping, states))
+
     def complete(
         self,
         name: str,
@@ -665,14 +722,15 @@ class GroqClient:
             budget.consume()
             error: Exception | None = None
             limited = False  # the last key failed on a rate or quota limit
-            keys = self.pool.available(estimated)
+            chosen = None if budget.provider in (None, "", "auto") else budget.provider
+            keys = self.pool.available(estimated, chosen)
             if not keys:
                 # Every key is busy: a short wait is better than a failed answer.
-                wait = self.pool.wait_time(estimated)
+                wait = self.pool.wait_time(estimated, chosen)
                 if wait > min(8.0, budget.remaining() - 5):
                     raise LLMBusy("Groq local rate budget exhausted")
                 time.sleep(wait + 0.05)
-                keys = self.pool.available(estimated)
+                keys = self.pool.available(estimated, chosen)
             if not keys:
                 raise LLMBusy("Groq local rate budget exhausted")
             for state in keys:
@@ -680,9 +738,13 @@ class GroqClient:
                 try:
                     with httpx.Client(
                         timeout=(
-                            min(12, budget.remaining() / 2)
-                            if state.json_object
-                            else min(10, budget.remaining() / 4)
+                            min(state.timeout, budget.remaining())
+                            if state.timeout
+                            else (
+                                min(12, budget.remaining() / 2)
+                                if state.json_object
+                                else min(10, budget.remaining() / 4)
+                            )
                         )
                     ) as client:
                         response = client.post(
@@ -777,6 +839,43 @@ class GroqClient:
                 raise error
             time.sleep(delay)
         raise RuntimeError("No valid model response")
+
+
+PROVIDER_LABELS = {
+    "gemini": "Gemini",
+    "groq": "Groq",
+    "literouter": "LiteRouter",
+    "ollama": "Ollama",
+}
+
+
+def _status_of(client: "GroqClient") -> list[dict[str, Any]]:
+    """Per provider: how many keys can be used now, or when the first one is back."""
+    now = time.monotonic()
+    found: dict[str, dict[str, Any]] = {}
+    for state in client.pool.states:
+        name = state.provider or "groq"
+        item = found.setdefault(
+            name,
+            {
+                "id": name,
+                "label": PROVIDER_LABELS.get(name, name),
+                "keys": 0,
+                "ready": 0,
+                "back_in_seconds": None,
+            },
+        )
+        item["keys"] += 1
+        back = state.rest_until - now
+        if back <= 0:
+            item["ready"] += 1
+        elif item["back_in_seconds"] is None or back < item["back_in_seconds"]:
+            item["back_in_seconds"] = round(back)
+    for item in found.values():
+        item["state"] = "ready" if item["ready"] else "resting"
+        if item["ready"]:
+            item["back_in_seconds"] = None
+    return list(found.values())
 
 
 def _header_int(headers: httpx.Headers, name: str) -> int | None:

@@ -3,3 +3,6 @@ GEMINI_API_KEYS=
 LITEROUTER_API_KEY=
 # GEMINI_MODEL=gemini-2.5-flash,gemini-3.6-flash
 # LITEROUTER_MODEL=deepseek-v3.2:free
+# Ollama on this machine (add `ollama` to LLM_PROVIDER_ORDER):
+# OLLAMA_URL=http://localhost:11434
+# OLLAMA_MODEL=qwen2.5:7b-instruct

@@ -4,3 +4,5 @@
 
 .task-title{margin:14px 0 6px;font-size:15px;font-weight:600}
 .task-part{margin-top:18px;padding-top:6px;border-top:1px solid var(--line,#dde5df)}
+
+.chat-toolbar{flex-wrap:wrap}.ai-picker{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px}.ai-picker label{display:flex;align-items:center;gap:8px;color:#5d7266}.ai-picker select{font-size:12px;border:1px solid #dce5de;border-radius:8px;padding:5px 8px;background:#fff;max-width:240px}.ai-picker button{font-size:12px;padding:4px 10px}.ai-picker small{font-size:11px;flex-basis:100%}.ai-warn{color:#ae4e42}.ai-back{color:#2d7a56;font-weight:600}

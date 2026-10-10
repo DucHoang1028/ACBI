@@ -9,6 +9,8 @@ class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
     conversation_id: str | None = None
     language: Literal["vi", "en"] = "en"
+    # The AI the user picked in the page; unknown or empty lets any one answer.
+    llm_provider: str | None = Field(default=None, max_length=20)
 
 
 def response(

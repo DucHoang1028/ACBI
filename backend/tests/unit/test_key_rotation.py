@@ -272,3 +272,98 @@ def test_any_provider_key_switches_the_model_on() -> None:
     assert Settings(gemini_api_keys="g", **common).has_llm_keys()
     assert Settings(literouter_api_key="l", **common).has_llm_keys()
     assert Settings(groq_api_key="k", **common).has_llm_keys()
+
+
+def two_providers(monkeypatch: pytest.MonkeyPatch, statuses: dict[str, int]) -> tuple:
+    """Gemini, Groq and a local Ollama, each answering with a fixed status."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        key = request.headers["authorization"].removeprefix("Bearer ")
+        seen.append(key)
+        if statuses[key] != 200:
+            return httpx.Response(
+                statuses[key], headers={"retry-after": "300"}, json={}
+            )
+        content = json.dumps({"text": f"answered by {key}"})
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": content}}]}
+        )
+
+    monkeypatch.setattr(
+        client_module.httpx,
+        "Client",
+        lambda *a, **k: REAL_CLIENT(transport=httpx.MockTransport(handler), timeout=5),
+    )
+    settings = Settings(
+        _env_file=None,
+        gemini_api_keys="m1",
+        gemini_model="model-a",
+        groq_api_key="g1",
+        ollama_url="http://localhost:11434/",
+        llm_provider_order="gemini,groq,ollama",
+        warehouse_password="x",
+        app_db_password="x",
+    )
+    return GroqClient(settings), seen
+
+
+def ask_as(groq: GroqClient, provider: str | None) -> str:
+    budget = RequestBudget(10, 3)
+    budget.provider = provider
+    return groq.complete(
+        "summary", SummaryProposal, SummaryProposal.model_json_schema(), "s", {}, budget
+    ).text
+
+
+def test_only_the_provider_the_user_picked_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    groq, seen = two_providers(monkeypatch, {"m1": 200, "g1": 200, "ollama": 200})
+    assert ask_as(groq, "ollama") == "answered by ollama"
+    assert seen == ["ollama"]
+    assert ask_as(groq, None) == "answered by ollama"  # sticks with the last good key
+    assert ask_as(groq, "auto") == "answered by ollama"
+    seen.clear()
+    assert ask_as(groq, "groq") == "answered by g1" and seen == ["g1"]
+
+
+def test_a_resting_provider_is_listed_with_its_wait_and_returns_when_it_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    groq, _ = two_providers(monkeypatch, {"m1": 429, "g1": 200, "ollama": 200})
+    assert ask_as(groq, None) == "answered by g1"  # gemini 429 hands over
+    listed = {p["id"]: p for p in groq.status()}
+    assert listed["gemini"]["state"] == "resting"
+    assert 250 <= listed["gemini"]["back_in_seconds"] <= 300
+    assert listed["groq"]["state"] == "ready" and listed["ollama"]["state"] == "ready"
+    with pytest.raises(LLMBusy):
+        ask_as(groq, "gemini")  # the picked provider is not replaced by another
+    groq.pool.states[0].rest_until = 0.0
+    assert {p["id"]: p["state"] for p in groq.status()}["gemini"] == "ready"
+
+
+def test_probe_clears_a_rest_when_the_provider_answers_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    statuses = {"m1": 429, "g1": 200, "ollama": 200}
+    groq, _ = two_providers(monkeypatch, statuses)
+    groq.probe("gemini")
+    assert {p["id"]: p["state"] for p in groq.status()}["gemini"] == "resting"
+    statuses["m1"] = 200
+    groq.probe("gemini")
+    assert {p["id"]: p["state"] for p in groq.status()}["gemini"] == "ready"
+
+
+def test_ollama_is_off_unless_its_address_is_set() -> None:
+    from app.ai.client import provider_keys
+
+    common = {"_env_file": None, "warehouse_password": "x", "app_db_password": "x"}
+    on = Settings(
+        ollama_url="http://localhost:11434/", llm_provider_order="ollama", **common
+    )
+    [state] = provider_keys(on)
+    assert state.url == "http://localhost:11434/v1" and state.timeout > 30
+    assert on.has_llm_keys()
+    off = Settings(llm_provider_order="ollama", **common)
+    assert provider_keys(off) == [] and not off.has_llm_keys()

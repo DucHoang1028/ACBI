@@ -95,7 +95,11 @@ Open http://localhost:8080. Add `-f deploy/docker-compose.demo.yml` when serving
 a tunnel (it sets the HTTPS forwarding header). Set `DEMO_LOGIN_ENABLED=false` to turn
 off the passwordless demo buttons. Language-model keys go in `deploy/.env` (Groq) and
 `deploy/llm-providers.local` (Gemini, LiteRouter); providers are tried in
-`LLM_PROVIDER_ORDER` (default `gemini,groq,literouter`).
+`LLM_PROVIDER_ORDER` (default `gemini,groq,literouter`). A model on your own machine can
+join through Ollama: set `OLLAMA_URL=http://localhost:11434` (and `OLLAMA_MODEL`, default
+`qwen2.5:7b-instruct`) and add `ollama` to the order. The chat page has an "AI" box to pick
+one provider or leave it on Automatic; it shows which ones are resting and when they are
+back, and "Check again" sends one tiny request per resting key to find out.
 
 ## More documentation
 
@@ -202,4 +206,8 @@ Mở http://localhost:8080. Thêm `-f deploy/docker-compose.demo.yml` khi chạy
 (nó bật header HTTPS). Đặt `DEMO_LOGIN_ENABLED=false` để tắt các nút đăng nhập nhanh
 không cần mật khẩu. Khóa của mô hình ngôn ngữ đặt trong `deploy/.env` (Groq) và
 `deploy/llm-providers.local` (Gemini, LiteRouter); thứ tự thử theo `LLM_PROVIDER_ORDER`
-(mặc định `gemini,groq,literouter`).
+(mặc định `gemini,groq,literouter`). Mô hình chạy trên máy bạn dùng được qua Ollama: đặt
+`OLLAMA_URL=http://localhost:11434` (và `OLLAMA_MODEL`, mặc định `qwen2.5:7b-instruct`) rồi
+thêm `ollama` vào thứ tự. Trang chat có ô "AI trả lời" để chọn một nhà cung cấp hoặc để Tự
+động; ô này cho biết nhà nào đang nghỉ và bao giờ hồi, nút "Kiểm tra lại" gửi một yêu cầu
+nhỏ cho mỗi khóa đang nghỉ để biết khóa nào đã dùng được.

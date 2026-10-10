@@ -13,6 +13,7 @@ class RequestBudget:
     seconds: float = 30
     max_calls: int = 3
     calls: int = 0
+    provider: str | None = None  # the AI the user picked; None lets any one answer
     started: float = field(default_factory=time.monotonic)
 
     def remaining(self) -> float:
