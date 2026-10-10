@@ -101,7 +101,7 @@ from app.presentation.visualization import (
     reshape_kind,
     reshaped,
 )
-from app.query.builder import authorize, build, prepare, supports
+from app.query.builder import authorize, build, prepare, resolve_dates, supports
 from app.query.comparison import (
     GROUP_COLUMN,
     MAX_PERIODS,
@@ -1331,6 +1331,22 @@ def answer_one(
             outcome = result["status"]
             return status_code, result
         intent = merged_intent(raw, prior, body.question)
+        year_named = [] if comparing else named_periods(body.question)
+        if len(year_named) == 1 and not re.search(COMPARE_WORDS, fold(body.question)):
+            try:
+                have = resolve_dates(intent, anchor) if intent.period else None
+            except ValueError:
+                have = None
+            if have and (have[1] <= year_named[0][1] or have[0] >= year_named[0][2]):
+                # The question names one period and the model answered another
+                # ("chiffre d'affaires en 2024" read as this year): use the named one.
+                intent = intent.model_copy(
+                    update={
+                        "period": "explicit",
+                        "start_date": year_named[0][1].isoformat(),
+                        "end_date": year_named[0][2].isoformat(),
+                    }
+                )
         if (
             intent.dimension == "none"
             and intent.series_dimension == "none"
@@ -1836,8 +1852,13 @@ def answer_one(
         return 200, result
     except HTTPException:
         raise
-    except BudgetExceeded:
-        logger.warning("Request %s: model call budget spent", request_id)
+    except (BudgetExceeded, ValidationError) as unclear:
+        # The model kept answering in a form that does not fit: ask to rephrase.
+        logger.warning(
+            "Request %s: question not understood (%s)",
+            request_id,
+            type(unclear).__name__,
+        )
         outcome = "needs_clarification"
         # Keep the conversation: the next message continues it.
         earlier = locals().get("prior") or {}
@@ -1872,7 +1893,6 @@ def answer_one(
     except (
         SQLAlchemyError,
         httpx.HTTPError,
-        ValidationError,
         RuntimeError,
         ValueError,
         KeyError,

@@ -424,3 +424,64 @@ def test_only_words_about_the_future_make_a_forecast() -> None:
         "Revenue by week in Q1 2025",
     ):
         assert not says_forecast(no), no
+
+
+def test_a_period_the_model_swapped_for_another_year_is_put_back(
+    monkeypatch: Any,
+) -> None:
+    patch_storage(monkeypatch)
+    question = "What is the revenue in 2024?"
+    wrong = intent(
+        metric_id="revenue",
+        period="explicit",
+        start_date="2025-01-01",
+        end_date="2025-06-30",
+    )
+    state = make_state(FakeLLM({question: wrong}))
+    _, result = orchestrator.answer(
+        AskRequest(question=question, language="en"), USER, state
+    )
+    assert result["status"] == "ok"
+    assert result["sources"]["parameters"]["start"] == "2024-01-01"
+    assert result["sources"]["parameters"]["end"] == "2025-01-01"
+
+
+def test_a_period_that_agrees_with_the_question_is_left_alone(
+    monkeypatch: Any,
+) -> None:
+    patch_storage(monkeypatch)
+    question = "Revenue in March 2025"
+    right = intent(
+        metric_id="revenue",
+        period="explicit",
+        start_date="2025-03-01",
+        end_date="2025-04-01",
+    )
+    _, result = orchestrator.answer(
+        AskRequest(question=question, language="en"),
+        USER,
+        make_state(FakeLLM({question: right})),
+    )
+    assert result["sources"]["parameters"]["start"] == "2025-03-01"
+
+
+def test_a_model_that_cannot_fill_the_intent_gets_a_rephrase_request(
+    monkeypatch: Any,
+) -> None:
+    from app.ai.client import Intent
+    from pydantic import ValidationError
+
+    patch_storage(monkeypatch)
+
+    class Garbled(FakeLLM):
+        def interpret(self, question: str, *args: Any, **kwargs: Any) -> Intent:
+            Intent.model_validate({})  # what an unusable reply looks like
+            raise AssertionError
+
+    with pytest.raises(ValidationError):
+        Garbled({}).interpret("x")
+    status, result = orchestrator.answer(
+        AskRequest(question="??? 😀", language="en"), USER, make_state(Garbled({}))
+    )
+    assert status == 200 and result["status"] == "needs_clarification"
+    assert "rephrase" in result["message"].lower()
