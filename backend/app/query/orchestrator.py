@@ -1337,16 +1337,39 @@ def answer_one(
                 have = resolve_dates(intent, anchor) if intent.period else None
             except ValueError:
                 have = None
-            if have and (have[1] <= year_named[0][1] or have[0] >= year_named[0][2]):
-                # The question names one period and the model answered another
-                # ("chiffre d'affaires en 2024" read as this year): use the named one.
-                intent = intent.model_copy(
-                    update={
-                        "period": "explicit",
-                        "start_date": year_named[0][1].isoformat(),
-                        "end_date": year_named[0][2].isoformat(),
-                    }
-                )
+            apart = have and (
+                have[1] <= year_named[0][1] or have[0] >= year_named[0][2]
+            )
+            if apart or not intent.period:
+                # The question names one period and the model answered another, or
+                # none ("chiffre d'affaires en 2024" read as this year): use the named.
+                fix: dict[str, Any] = {
+                    "period": "explicit",
+                    "start_date": year_named[0][1].isoformat(),
+                    "end_date": year_named[0][2].isoformat(),
+                }
+                if not intent.period:
+                    left = [f for f in intent.missing_fields if f != "period"]
+                    fix.update(needs_clarification=bool(left), missing_fields=left)
+                intent = intent.model_copy(update=fix)
+        if (
+            intent.period
+            and intent.period != "recently"
+            and not ((prior or {}).get("slots") or {}).get("period")
+            and not mentions_time(body.question)
+        ):
+            # No word about time and nothing earlier to carry over: the period was
+            # invented by the model. Ask, as the assistant is documented to do.
+            intent = intent.model_copy(
+                update={
+                    "period": None,
+                    "start_date": None,
+                    "end_date": None,
+                    "needs_clarification": True,
+                    "clarification_question": None,
+                    "missing_fields": list({*intent.missing_fields, "period"}),
+                }
+            )
         if (
             intent.dimension == "none"
             and intent.series_dimension == "none"

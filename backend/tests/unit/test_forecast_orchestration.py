@@ -485,3 +485,37 @@ def test_a_model_that_cannot_fill_the_intent_gets_a_rephrase_request(
     )
     assert status == 200 and result["status"] == "needs_clarification"
     assert "rephrase" in result["message"].lower()
+
+
+def test_a_year_in_the_question_fills_the_period_the_model_left_empty(
+    monkeypatch: Any,
+) -> None:
+    patch_storage(monkeypatch)
+    question = "What is the revenue in 2024?"
+    asked_again = intent(
+        metric_id="revenue",
+        period=None,
+        needs_clarification=True,
+        missing_fields=["period"],
+    )
+    _, result = orchestrator.answer(
+        AskRequest(question=question, language="en"),
+        USER,
+        make_state(FakeLLM({question: asked_again})),
+    )
+    assert result["status"] == "ok"
+    assert result["sources"]["parameters"]["start"] == "2024-01-01"
+
+
+def test_a_period_the_model_made_up_is_asked_for_instead(monkeypatch: Any) -> None:
+    patch_storage(monkeypatch)
+    question = "Revenue for Canada, quickly please"
+    invented = intent(metric_id="revenue", period="this_month", territory="Canada")
+    status, result = orchestrator.answer(
+        AskRequest(question=question, language="en"),
+        USER,
+        make_state(FakeLLM({question: invented})),
+    )
+    assert status == 200 and result["status"] == "needs_clarification"
+    assert "period" in result["message"].lower() or "month" in result["message"].lower()
+    assert not result["table"]
