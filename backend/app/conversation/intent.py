@@ -21,6 +21,7 @@ from app.core.dates import (
     compares_two_periods,
     intent_hints,
     is_confirmation,
+    is_share_question,
     moves_period,
     named_periods,
     single_dimension,
@@ -441,6 +442,16 @@ def merged_intent(
     if len(named) > 1 and current.get("dimension") in ("none", "factory"):
         # "Factory A với Factory B": one row per factory, not a filter to the first.
         current.update(dimension="factory", factory_id=None)
+    elif (
+        len(named) == 1
+        and current.get("factory_id") is None
+        and current.get("dimension") != "factory"
+        and not is_share_question(question)
+        and named[0] in vocabulary.get().ids("factory")
+    ):
+        # A factory the user names is a filter even when the model left it out: the
+        # answer must not silently be the total of all factories.
+        current["factory_id"] = vocabulary.get().ids("factory")[named[0]]
     unknown = _unknown_choice(current, question)
     if unknown:
         current.update(

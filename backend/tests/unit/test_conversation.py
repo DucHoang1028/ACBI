@@ -1103,3 +1103,20 @@ def test_two_factories_named_are_compared_not_filtered_to_the_first() -> None:
         raw.model_copy(update={"dimension": "none"}), None, "sản lượng Factory A 2024"
     )
     assert one.factory_id == 1
+
+
+def test_a_named_factory_is_a_filter_even_when_the_model_left_it_out() -> None:
+    raw = intent(
+        metric_id="revenue",
+        dimension="week",
+        period="explicit",
+        start_date="2025-03-01",
+        end_date="2025-04-01",
+        needs_clarification=False,
+        clarification_question=None,
+        missing_fields=[],
+    )
+    filled = merged_intent(raw, None, "Doanh thu của Factory A theo tuần tháng 3 2025")
+    assert filled.factory_id == 1  # authorize() then refuses revenue by factory
+    share = merged_intent(raw, None, "Factory A chiếm bao nhiêu phần trăm doanh thu")
+    assert share.factory_id is None
