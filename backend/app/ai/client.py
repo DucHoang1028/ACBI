@@ -643,13 +643,7 @@ class GroqClient:
                 state.rest_until = 0.0
                 return True
             except httpx.HTTPStatusError as failure:
-                said = failure.response.text
-                status = failure.response.status_code
-                after = _retry_after(failure.response.headers)
-                if status == 403 and "rate limit" in said.lower():
-                    status, after = 429, after or state.gap or None
-                if status == 429 and "PerDay" in said:
-                    after = 3600.0
+                status, after = _quota_wait(failure.response, state)
                 self.pool.failed(state, status, after)
             except httpx.TransportError:
                 self.pool.failed(state, None, None)
@@ -800,13 +794,7 @@ class GroqClient:
                             failure.response.text[:200],
                         )
                         raise  # the request itself is wrong; another key cannot help
-                    retry_after = _retry_after(failure.response.headers)
-                    said = failure.response.text
-                    if status == 403 and "rate limit" in said.lower():
-                        # LiteRouter says "too soon" with 403: a wait, not a dead key.
-                        status, retry_after = 429, retry_after or state.gap or None
-                    if status == 429 and "PerDay" in said:
-                        retry_after = 3600.0  # out for the day: stop asking each minute
+                    status, retry_after = _quota_wait(failure.response, state)
                     limited = status == 429
                     self.pool.failed(state, status, retry_after)
                     logger.warning(
@@ -886,6 +874,20 @@ def _status_of(client: "GroqClient") -> list[dict[str, Any]]:
 def _header_int(headers: httpx.Headers, name: str) -> int | None:
     value = headers.get(name)
     return int(value) if value and value.isdigit() else None
+
+
+def _quota_wait(response: httpx.Response, state: KeyState) -> tuple[int, float | None]:
+    """A refusal that means "limit reached" is a wait, not a broken key.
+
+    LiteRouter says both "too soon" and "daily limit reached" with 403."""
+    status = response.status_code
+    wait = _retry_after(response.headers)
+    said = response.text.lower()
+    if status == 403 and "limit" in said:
+        status, wait = 429, wait or state.gap or None
+    if status == 429 and ("perday" in said or "daily" in said):
+        wait = 3600.0  # out for the day: stop asking each minute
+    return status, wait
 
 
 def _retry_after(headers: httpx.Headers) -> float | None:

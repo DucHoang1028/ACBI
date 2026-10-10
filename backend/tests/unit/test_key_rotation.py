@@ -367,3 +367,37 @@ def test_ollama_is_off_unless_its_address_is_set() -> None:
     assert on.has_llm_keys()
     off = Settings(llm_provider_order="ollama", **common)
     assert provider_keys(off) == [] and not off.has_llm_keys()
+
+
+@pytest.mark.parametrize(
+    ("body", "rests", "busy"),
+    [
+        ({"error": "Daily limit reached on the Basic tier"}, 3600, True),
+        ({"error": "Rate limit exceeded, 7 seconds between messages"}, 7, True),
+        ({"error": "Invalid API key"}, 3600, False),
+    ],
+)
+def test_a_403_that_names_a_limit_is_a_wait_not_a_broken_key(
+    monkeypatch: pytest.MonkeyPatch, body: dict[str, str], rests: int, busy: bool
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json=body)
+
+    monkeypatch.setattr(
+        client_module.httpx,
+        "Client",
+        lambda *a, **k: REAL_CLIENT(transport=httpx.MockTransport(handler), timeout=5),
+    )
+    settings = Settings(
+        _env_file=None,
+        literouter_api_key="l1",
+        llm_provider_order="literouter",
+        warehouse_password="x",
+        app_db_password="x",
+    )
+    groq = GroqClient(settings)
+    with pytest.raises(LLMBusy if busy else httpx.HTTPStatusError):
+        ask_as(groq, None)
+    [item] = groq.status()
+    assert item["state"] == "resting"
+    assert item["back_in_seconds"] <= rests and item["back_in_seconds"] >= rests - 10
