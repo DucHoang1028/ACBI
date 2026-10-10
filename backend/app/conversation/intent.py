@@ -1026,6 +1026,18 @@ def said_in(request: str, message: str) -> bool:
 MORE = r"\b(?:them|more|another|further|extra)\b"
 
 
+FORECAST_WORDS = (
+    r"\b(?:du bao|du doan|forecast|predict\w*|projection|project(?:ed)?|tuong lai|"
+    r"future|sap toi|next|coming|ahead|upcoming|following)\b"
+    r"|\b(?:thang|quy|nam|tuan)\s+(?:toi|sau|ke tiep|tiep theo)\b"
+)
+
+
+def says_forecast(question: str) -> bool:
+    """A forecast asks about the future in words; a model alone cannot make it one."""
+    return bool(re.search(FORECAST_WORDS, fold(question)))
+
+
 def forecast_follow_up(
     question: str, raw: Intent, slots: dict[str, Any]
 ) -> Intent | None:

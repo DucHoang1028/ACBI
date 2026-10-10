@@ -43,6 +43,7 @@ from app.conversation.intent import (
     resolve_corrections,
     resume_pending,
     said_in,
+    says_forecast,
     split_tasks,
     top_share_intent,
     unstick,
@@ -1230,6 +1231,16 @@ def answer_one(
                         missing_fields=[],
                     )
                 raw = raw.model_copy(update=update)
+        fresh = not prior or (
+            not prior.get("pending_question")
+            and (prior.get("slots") or {}).get("intent_type") != "forecast"
+        )
+        if raw.intent_type == "forecast" and fresh and not says_forecast(first):
+            # A small model once read "by week in Q1" as a forecast: only a question
+            # that talks about the future is answered with one.
+            raw = raw.model_copy(
+                update={"intent_type": "metric_query", "horizon_months": None}
+            )
         raw = resume_pending(raw, prior)
         if not canned and (
             again := forecast_follow_up(first, raw, (prior or {}).get("slots") or {})

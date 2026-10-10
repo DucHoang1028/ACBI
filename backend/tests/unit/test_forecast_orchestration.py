@@ -381,3 +381,46 @@ def test_a_refusal_names_the_scope_and_never_a_silly_percentage(
     assert result["status"] == "needs_clarification"
     assert "doanh thu của Central" in result["message"]
     assert "hơn 100%" in result["message"], result["message"]
+
+
+def test_a_model_cannot_turn_a_plain_question_into_a_forecast(
+    monkeypatch: Any,
+) -> None:
+    patch_storage(monkeypatch)
+    question = "Revenue for Australia in Q1 2025"
+    llm = FakeLLM(
+        {
+            question: intent(
+                metric_id="revenue",
+                intent_type="forecast",
+                period="explicit",
+                start_date="2025-01-01",
+                end_date="2025-04-01",
+                territory="Australia",
+            )
+        }
+    )
+    status, result = orchestrator.answer(
+        AskRequest(question=question, language="en"), USER, make_state(llm)
+    )
+    assert status == 200 and result["status"] == "ok"
+    assert "forecast" not in result["sources"]
+
+
+def test_only_words_about_the_future_make_a_forecast() -> None:
+    from app.conversation.intent import says_forecast
+
+    for yes in (
+        "Dự báo doanh thu 6 tháng tới",
+        "forecast revenue",
+        "Doanh thu quý sau",
+        "revenue for the next 3 months",
+        "Sản lượng sắp tới",
+    ):
+        assert says_forecast(yes), yes
+    for no in (
+        "Sản lượng Factory A theo tuần trong quý 1 năm 2025",
+        "Cho tôi xem doanh thu năm 2024",
+        "Revenue by week in Q1 2025",
+    ):
+        assert not says_forecast(no), no
