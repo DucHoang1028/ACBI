@@ -285,3 +285,15 @@ def test_a_year_of_days_fits_in_a_generated_query_but_other_lists_stay_short() -
         ),
     )
     assert "LIMIT 400" in validate(plan, day, "manager", generated=True).sql
+
+
+def test_one_day_given_as_both_start_and_end_is_that_day() -> None:
+    from app.query.builder import resolve_dates
+
+    one = intent(period="explicit", start_date="2024-02-29", end_date="2024-02-29")
+    assert resolve_dates(one, ANCHOR) == (date(2024, 2, 29), date(2024, 3, 1))
+    backwards = intent(
+        period="explicit", start_date="2024-03-02", end_date="2024-03-01"
+    )
+    with pytest.raises(ValueError):
+        resolve_dates(backwards, ANCHOR)

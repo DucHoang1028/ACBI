@@ -44,6 +44,8 @@ def resolve_dates(intent: Intent, anchor: date) -> tuple[date, date]:
             if intent.end_date
             else anchor + timedelta(days=1)
         )
+        if end == start:
+            end = start + timedelta(days=1)  # one date given twice names that day
     elif intent.period:
         start, end = resolve_period(intent.period, anchor)
     else:
