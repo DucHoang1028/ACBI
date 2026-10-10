@@ -4,7 +4,6 @@
 import json
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Protocol, TypeVar
 
 import httpx
@@ -620,10 +619,13 @@ class GroqClient:
         return _status_of(self)
 
     def probe(self, provider: str) -> None:
-        """One tiny call per key of a provider, to learn which ones work again."""
+        """Tiny calls to a provider's keys until one answers: is it usable now?
+
+        A key that answers costs one request of its quota; one that is limited costs
+        nothing, so the walk stops at the first success."""
         states = [s for s in self.pool.states if s.provider == provider]
 
-        def ping(state: KeyState) -> None:
+        def ping(state: KeyState) -> bool:
             body = {
                 "model": state.model or self.model,
                 "messages": [{"role": "user", "content": "ok"}],
@@ -639,6 +641,7 @@ class GroqClient:
                     )
                 response.raise_for_status()
                 state.rest_until = 0.0
+                return True
             except httpx.HTTPStatusError as failure:
                 said = failure.response.text
                 status = failure.response.status_code
@@ -650,9 +653,11 @@ class GroqClient:
                 self.pool.failed(state, status, after)
             except httpx.TransportError:
                 self.pool.failed(state, None, None)
+            return False
 
-        with ThreadPoolExecutor(max_workers=6) as pool:
-            list(pool.map(ping, states))
+        for state in states:
+            if ping(state):
+                break
 
     def complete(
         self,

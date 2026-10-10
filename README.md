@@ -99,7 +99,7 @@ off the passwordless demo buttons. Language-model keys go in `deploy/.env` (Groq
 join through Ollama: set `OLLAMA_URL=http://localhost:11434` (and `OLLAMA_MODEL`, default
 `qwen2.5:7b-instruct`) and add `ollama` to the order. The chat page has an "AI" box to pick
 one provider or leave it on Automatic; it shows which ones are resting and when they are
-back, and "Check again" sends one tiny request per resting key to find out.
+back, and "Check now" sends tiny requests until one key of the provider answers.
 
 ## More documentation
 
@@ -209,5 +209,5 @@ không cần mật khẩu. Khóa của mô hình ngôn ngữ đặt trong `deplo
 (mặc định `gemini,groq,literouter`). Mô hình chạy trên máy bạn dùng được qua Ollama: đặt
 `OLLAMA_URL=http://localhost:11434` (và `OLLAMA_MODEL`, mặc định `qwen2.5:7b-instruct`) rồi
 thêm `ollama` vào thứ tự. Trang chat có ô "AI trả lời" để chọn một nhà cung cấp hoặc để Tự
-động; ô này cho biết nhà nào đang nghỉ và bao giờ hồi, nút "Kiểm tra lại" gửi một yêu cầu
-nhỏ cho mỗi khóa đang nghỉ để biết khóa nào đã dùng được.
+động; ô này cho biết nhà nào đang nghỉ và bao giờ hồi, nút "Kiểm tra" gửi các yêu cầu nhỏ
+cho đến khi một khóa của nhà đó trả lời.
