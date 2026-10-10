@@ -126,7 +126,9 @@ from app.query.validation import (
     SQLCorrectionError,
     SQLPolicyError,
     SQLScopeError,
+    SQLShapeError,
     ValidatedQuery,
+    bind_period,
     validate,
 )
 
@@ -171,7 +173,9 @@ def run_query(
     for row in rows:
         row.pop("invalid_detail_count", None)
         for key, value in row.items():
-            if isinstance(value, (Decimal, date, datetime)):
+            if isinstance(value, Decimal) and value == 0:
+                row[key] = "0"  # not 0E-20
+            elif isinstance(value, (Decimal, date, datetime)):
                 row[key] = str(value)
     return rows
 
@@ -247,13 +251,27 @@ def route_query(
             )
         try:
             plan = validate(
-                replace(base, sql=candidate.sql), intent, role, generated=True
+                replace(base, sql=bind_period(candidate.sql, base.start, base.end)),
+                intent,
+                role,
+                generated=True,
             )
             return plan, "rag_text_to_sql", [r["id"] for r in references]
         except SQLCorrectionError:
             if attempt >= state.settings.llm_max_regenerations:
                 raise RuntimeError("SQL correction limit reached")
             error = "Invalid PostgreSQL syntax. Return one SELECT statement."
+        except SQLShapeError as rejected:
+            # Only a departure from the approved shape is sent back for another try;
+            # security rules (writes, other tables, functions) are never retried.
+            if attempt >= state.settings.llm_max_regenerations:
+                raise
+            error = (
+                f"Rejected: {rejected}. Copy the approved example's shape: bind the "
+                "period as :start and :end (no literal dates), add no filter or join "
+                "of your own (the backend applies factory and territory scope), and "
+                "return only the metric, the dimension alias and sample_count."
+            )
     raise RuntimeError("No valid SQL candidate")
 
 

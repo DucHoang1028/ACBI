@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 import sqlglot
@@ -92,6 +93,10 @@ FUNCTIONS = {
 
 class SQLPolicyError(PermissionError):
     """Policy violations are never retried or routed through another path."""
+
+
+class SQLShapeError(SQLPolicyError):
+    """The proposal departs from an approved metric's shape; it may be corrected."""
 
 
 class SQLScopeError(SQLPolicyError):
@@ -210,14 +215,14 @@ def verify_metric_formula(
         "on_time_rate": {"production.workorder"},
     }
     if physical_names != supported_sources[str(metric)]:
-        raise SQLPolicyError("The query uses tables outside this approved mapping")
+        raise SQLShapeError("The query uses tables outside this approved mapping")
     if metric != "sales_growth" and tree.args.get("with_"):
-        raise SQLPolicyError("This mapping does not need a generated CTE")
+        raise SQLShapeError("This mapping does not need a generated CTE")
     output = next(
         (part for part in tree.expressions if part.alias_or_name == metric), None
     )
     if not isinstance(output, exp.Alias):
-        raise SQLPolicyError("The approved metric output is required")
+        raise SQLShapeError("The approved metric output is required")
     expected = {
         "revenue": "SUM(subtotal)",
         "production_output": "SUM(orderqty-scrappedqty)",
@@ -234,10 +239,10 @@ def verify_metric_formula(
     if expression_key(output.this) != expression_key(
         approved_expression.expressions[0].this
     ):
-        raise SQLPolicyError("The proposed SQL changes an approved metric formula")
+        raise SQLShapeError("The proposed SQL changes an approved metric formula")
     if metric == "sales_growth":
         if intent.dimension != "sales_territory":
-            raise SQLPolicyError("Growth grouping is not approved")
+            raise SQLShapeError("Growth grouping is not approved")
         for alias, start, end, aggregate in (
             ("current_revenue", "start", "end", exp.Sum),
             ("previous_revenue", "baseline_start", "baseline_end", exp.Sum),
@@ -250,22 +255,22 @@ def verify_metric_formula(
                 if n.alias == alias and isinstance(n.this, exp.Filter)
             ]
             if len(matches) != 1:
-                raise SQLPolicyError(
+                raise SQLShapeError(
                     "Growth periods must follow the approved definition"
                 )
             filtered = matches[0].this
             if not isinstance(filtered.this, aggregate):
-                raise SQLPolicyError("Growth totals must use approved aggregates")
+                raise SQLShapeError("Growth totals must use approved aggregates")
             if (
                 aggregate is exp.Sum
                 and expression_key(filtered.this.this) != "subtotal"
             ):
-                raise SQLPolicyError("Growth revenue must use header subtotal")
+                raise SQLShapeError("Growth revenue must use header subtotal")
             if aggregate is exp.Count and not isinstance(filtered.this.this, exp.Star):
-                raise SQLPolicyError("Growth period counts must count orders")
+                raise SQLShapeError("Growth period counts must count orders")
             bound = {p.name for p in filtered.find_all(exp.Placeholder)}
             if bound != {start, end}:
-                raise SQLPolicyError("Growth periods must use the resolved dates")
+                raise SQLShapeError("Growth periods must use the resolved dates")
             filter_condition = filtered.args.get("expression")
             condition_key = expression_key(filter_condition) if filter_condition else ""
             reference = sqlglot.parse_one(
@@ -276,7 +281,7 @@ def verify_metric_formula(
             assert isinstance(reference, exp.Select)
             expected_filter = reference.expressions[0].this.args["expression"]
             if condition_key != expression_key(expected_filter):
-                raise SQLPolicyError("Growth periods must use exact date boundaries")
+                raise SQLShapeError("Growth periods must use exact date boundaries")
         condition = tree.args.get("where")
         count_guard = sqlglot.parse_one(
             "SELECT 1 WHERE current_count>0 AND previous_count>0", read="postgres"
@@ -285,30 +290,30 @@ def verify_metric_formula(
         if not condition or expression_key(condition) != expression_key(
             count_guard.args["where"]
         ):
-            raise SQLPolicyError("Growth needs records in both periods")
+            raise SQLShapeError("Growth needs records in both periods")
         cte = tree.args.get("with_")
         if not cte or len(cte.expressions) != 1:
-            raise SQLPolicyError("Growth requires the approved two-period calculation")
+            raise SQLShapeError("Growth requires the approved two-period calculation")
         period_query = cte.expressions[0].this
         if not isinstance(period_query, exp.Select) or period_query.args.get("where"):
-            raise SQLPolicyError("Growth cannot add an unapproved filter")
+            raise SQLShapeError("Growth cannot add an unapproved filter")
         grouping = period_query.args.get("group")
         if (
             not grouping
             or len(grouping.expressions) != 1
             or expression_key(grouping.expressions[0]) != "territoryid"
         ):
-            raise SQLPolicyError("Growth must group by territory")
+            raise SQLShapeError("Growth must group by territory")
         joins = tree.args.get("joins") or []
         if len(joins) != 1 or not isinstance(joins[0].args.get("on"), exp.EQ):
-            raise SQLPolicyError("Growth needs the territory mapping")
+            raise SQLShapeError("Growth needs the territory mapping")
         joined_columns = list(joins[0].args["on"].find_all(exp.Column))
         if (
             len(joined_columns) != 2
             or any(c.name != "territoryid" for c in joined_columns)
             or joined_columns[0].table == joined_columns[1].table
         ):
-            raise SQLPolicyError("Growth needs the territory key join")
+            raise SQLShapeError("Growth needs the territory key join")
         approved_columns = {
             "territoryid",
             "territory",
@@ -317,7 +322,7 @@ def verify_metric_formula(
             "sales_growth",
         }
         if any(part.alias_or_name not in approved_columns for part in tree.expressions):
-            raise SQLPolicyError(
+            raise SQLShapeError(
                 "Growth output columns must follow the approved mapping"
             )
         territory = next(
@@ -328,7 +333,7 @@ def verify_metric_formula(
             or not isinstance(territory.this, exp.Column)
             or territory.this.name != "name"
         ):
-            raise SQLPolicyError("Territory name must use the approved dimension")
+            raise SQLShapeError("Territory name must use the approved dimension")
     elif not tree.args.get("group") and any(
         isinstance(n, exp.AggFunc) for n in output.this.walk()
     ):
@@ -338,7 +343,7 @@ def verify_metric_formula(
         if not having or expression_key(having) != expression_key(
             count_guard.args["having"]
         ):
-            raise SQLPolicyError("Empty aggregate results require a count guard")
+            raise SQLShapeError("Empty aggregate results require a count guard")
     if metric != "sales_growth":
         date_column = "orderdate" if metric == "revenue" else "enddate"
         where = tree.args.get("where")
@@ -348,7 +353,7 @@ def verify_metric_formula(
         )
         assert isinstance(reference, exp.Select)
         if where and expression_key(where) != expression_key(reference.args["where"]):
-            raise SQLPolicyError("Extra or changed reporting filters are not approved")
+            raise SQLShapeError("Extra or changed reporting filters are not approved")
         count_aliases = [
             n for n in tree.expressions if n.alias_or_name == "sample_count"
         ]
@@ -358,10 +363,10 @@ def verify_metric_formula(
             or not isinstance(count_aliases[0].this, exp.Count)
             or not isinstance(count_aliases[0].this.this, exp.Star)
         ):
-            raise SQLPolicyError("Sample count must count source records")
+            raise SQLShapeError("Sample count must count source records")
         approved_columns = {metric, "sample_count", intent.dimension}
         if any(part.alias_or_name not in approved_columns for part in tree.expressions):
-            raise SQLPolicyError("Output columns must follow the approved mapping")
+            raise SQLShapeError("Output columns must follow the approved mapping")
     if intent.dimension in {"day", "week"}:
         dimension = next(
             (
@@ -372,7 +377,7 @@ def verify_metric_formula(
             None,
         )
         if not isinstance(dimension, exp.Alias):
-            raise SQLPolicyError("Requested date grouping is required")
+            raise SQLShapeError("Requested date grouping is required")
         date_column = "orderdate" if metric == "revenue" else "enddate"
         expected_date = (
             f"date_trunc('week',{date_column})::date"
@@ -386,20 +391,20 @@ def verify_metric_formula(
         if expression_key(dimension.this) != expression_key(
             expected_query.expressions[0].this
         ):
-            raise SQLPolicyError("Date grouping differs from the approved mapping")
+            raise SQLShapeError("Date grouping differs from the approved mapping")
         grouping = tree.args.get("group")
         if (
             not grouping
             or len(grouping.expressions) != 1
             or expression_key(grouping.expressions[0]) != expression_key(dimension.this)
         ):
-            raise SQLPolicyError("Trend must group by its date bucket")
+            raise SQLShapeError("Trend must group by its date bucket")
         having = tree.args.get("having")
         guard = sqlglot.parse_one("SELECT 1 HAVING COUNT(*)>0", read="postgres")
         assert isinstance(guard, exp.Select)
         # HAVING COUNT(*)>0 is harmless on grouped rows; other filters drop buckets.
         if having and expression_key(having) != expression_key(guard.args["having"]):
-            raise SQLPolicyError("Trend cannot remove date buckets")
+            raise SQLShapeError("Trend cannot remove date buckets")
 
 
 def parse_select(sql: str, role: str) -> tuple[exp.Select, list[exp.Table]]:
@@ -481,11 +486,11 @@ def validate(
         else "production.workorder"
     )
     if required not in {f"{t.db}.{t.name}" for t in physical}:
-        raise SQLPolicyError("The approved metric source is required")
+        raise SQLShapeError("The approved metric source is required")
     params = dict(plan.params)
     for placeholder in tree.find_all(exp.Placeholder):
         if placeholder.name not in params or placeholder.name.startswith("_"):
-            raise SQLPolicyError("Unknown query parameter")
+            raise SQLShapeError("Unknown query parameter")
     schema: dict[str, Any] = {}
     for name, columns in allowed_tables(role).items():
         namespace, table = name.split(".")
@@ -559,3 +564,21 @@ def validate(
     return ValidatedQuery(
         sql, params, plan.metric_id, plan.start, plan.end, plan.version
     )
+
+
+def bind_period(sql: str, start: date, end: date) -> str:
+    """Write the resolved period as :start and :end where a model spelled it out.
+
+    Only a string equal to the period's own dates is replaced, so the query means the
+    same; any other date is left for the validator to reject."""
+    try:
+        trees = sqlglot.parse(sql, read="postgres")
+    except ParseError:
+        return sql
+    if len(trees) != 1 or trees[0] is None:
+        return sql  # several statements: the validator refuses them
+    named = {start.isoformat(): "start", end.isoformat(): "end"}
+    for literal in list(trees[0].find_all(exp.Literal)):
+        if literal.is_string and literal.this in named:
+            literal.replace(exp.Placeholder(this=named[literal.this]))
+    return trees[0].sql(dialect="postgres")

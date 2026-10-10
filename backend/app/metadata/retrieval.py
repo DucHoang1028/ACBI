@@ -52,7 +52,16 @@ class BM25Retriever:
                             {
                                 "id": "mapping:" + mapping["mappingId"],
                                 "kind": "mapping",
-                                "text": str(mapping),
+                                # Generated SQL may not use a CTE (the backend scopes
+                                # the source itself): do not show one to copy.
+                                "text": str(
+                                    {
+                                        k: v
+                                        for k, v in mapping.items()
+                                        if metric_id == "sales_growth"
+                                        or k != "referenceFactSQL"
+                                    }
+                                ),
                             }
                         )
         if not corpus:

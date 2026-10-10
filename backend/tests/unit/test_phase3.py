@@ -221,3 +221,49 @@ def test_question_and_retrieved_injection_cannot_override_sql_policy() -> None:
     with pytest.raises(SQLPolicyError):
         route_query(question, intent(), "sales", ANCHOR, state, RequestBudget(30, 3))
     assert fake.calls == 1
+
+
+WEEKLY = (
+    "SELECT date_trunc('week',h.orderdate)::date AS week,SUM(h.subtotal) AS revenue "
+    "FROM sales.salesorderheader h WHERE h.orderdate>={a} AND h.orderdate<{b} "
+    "GROUP BY 1 ORDER BY 1"
+)
+
+
+def rag_state(*candidates: str) -> tuple[SimpleNamespace, FakeLLM]:
+    fake = FakeLLM(
+        {}, {"q": [SQLCandidate(sql=c, missing_information=None) for c in candidates]}
+    )
+    retriever = SimpleNamespace(retrieve=lambda *_: [{"id": "m", "text": "approved"}])
+    settings = SimpleNamespace(external_metadata_enabled=True, llm_max_regenerations=2)
+    return SimpleNamespace(settings=settings, llm=fake, retriever=retriever), fake
+
+
+def test_period_the_model_spelled_out_is_bound_and_other_dates_are_refused() -> None:
+    user_intent = intent(
+        period="explicit", start_date="2025-03-01", end_date="2025-04-01"
+    )
+    literal = WEEKLY.format(a="'2025-03-01'", b="'2025-04-01'")
+    state, fake = rag_state(literal)
+    plan, path, _ = route_query(
+        "q", user_intent, "manager", ANCHOR, state, RequestBudget(30, 4)
+    )
+    assert path == "rag_text_to_sql" and fake.calls == 1
+    assert "2025-03-01" not in plan.sql and plan.params["start"] == date(2025, 3, 1)
+    other, _ = rag_state(WEEKLY.format(a="'2024-01-01'", b="'2025-04-01'"))
+    with pytest.raises(SQLPolicyError):
+        route_query("q", user_intent, "manager", ANCHOR, other, RequestBudget(30, 4))
+
+
+def test_a_departure_from_the_approved_shape_is_sent_back_once_corrected() -> None:
+    user_intent = intent(
+        period="explicit", start_date="2025-03-01", end_date="2025-04-01"
+    )
+    extra = WEEKLY.format(a=":start", b=":end").replace(
+        "GROUP BY", "AND h.subtotal>0 GROUP BY"
+    )
+    state, fake = rag_state(extra, WEEKLY.format(a=":start", b=":end"))
+    _, path, _ = route_query(
+        "q", user_intent, "manager", ANCHOR, state, RequestBudget(30, 4)
+    )
+    assert path == "rag_text_to_sql" and fake.calls == 2

@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     stt_model: str = "whisper-large-v3-turbo"
     llm_requests_per_minute: int = Field(default=15, ge=1)
     llm_tokens_per_minute: int = Field(default=8000, ge=1)
-    llm_max_calls_per_request: int = Field(default=3, ge=1, le=10)
+    llm_max_calls_per_request: int = Field(default=4, ge=1, le=10)
     llm_max_regenerations: int = Field(default=2, ge=0, le=2)
     request_timeout_seconds: int = Field(default=30, ge=1, le=120)
     send_results_to_llm: bool = False
