@@ -556,14 +556,21 @@ def validate(
                 else int(literal.this) if literal.is_int else float(literal.this)
             )
         literal.replace(exp.Placeholder(this=literal_names[key]))
-    cap = 250 if intent.series_dimension != "none" else 100
-    tree.set("limit", exp.Limit(expression=exp.Literal.number(min(intent.limit, cap))))
+    tree.set("limit", exp.Limit(expression=exp.Literal.number(row_cap(intent))))
     sql = tree.sql(dialect="postgres")
     # SQLAlchemy text() uses :name, whereas SQLGlot's Postgres output uses %(name)s.
     sql = re.sub(r"%\(([A-Za-z_][A-Za-z_0-9]*)\)s", r":\1", sql)
     return ValidatedQuery(
         sql, params, plan.metric_id, plan.start, plan.end, plan.version
     )
+
+
+def row_cap(intent: Intent) -> int:
+    """Rows a generated query may return: a year of days fits, lists stay short."""
+    cap = 400 if intent.dimension in {"day", "week", "month"} else 100
+    if intent.series_dimension != "none":
+        cap = 250
+    return min(intent.limit, cap)
 
 
 def bind_period(sql: str, start: date, end: date) -> str:

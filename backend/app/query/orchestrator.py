@@ -129,6 +129,7 @@ from app.query.validation import (
     SQLShapeError,
     ValidatedQuery,
     bind_period,
+    row_cap,
     validate,
 )
 
@@ -1529,9 +1530,12 @@ def answer_one(
         if WHICH.search(fold(body.question)) and intent.dimension != "none":
             # "Which factory is best?" shows every factory so the answer can be checked.
             intent = intent.model_copy(update={"limit": max(intent.limit, 100)})
-        if intent.dimension in {"day", "week", "month"} and intent.limit < 250:
-            # Rows come in date order: "the highest month" cannot be cut to one row.
-            intent = intent.model_copy(update={"limit": 250})
+        if intent.dimension in {"day", "week", "month"}:
+            # Rows come in date order: "the highest month" cannot be cut to one row,
+            # and a whole year of days (366) must fit.
+            room = 250 if intent.series_dimension != "none" else 400
+            if intent.limit < room:
+                intent = intent.model_copy(update={"limit": room})
         if intent.series_dimension != "none" and intent.limit < 250:
             # A stacked chart needs every group: the default cap would cut it short.
             intent = intent.model_copy(update={"limit": 250})
@@ -1706,6 +1710,15 @@ def answer_one(
             if whole_rows and whole_rows[0].get(plan.metric_id) is not None:
                 whole = Decimal(str(whole_rows[0][plan.metric_id]))
         outcome = "ok" if rows else "no_data"
+        if rows and len(rows) >= row_cap(intent) and not top_n(body.question):
+            cut = (
+                f"Chỉ hiển thị {len(rows)} dòng đầu tiên; còn dòng khác chưa hiển "
+                "thị. Hãy thu hẹp khoảng thời gian hoặc nhóm để xem đủ."
+                if body.language == "vi"
+                else f"Only the first {len(rows)} rows are shown; there are more. "
+                "Narrow the period or group to see them all."
+            )
+            growth_note = f"{growth_note} {cut}" if growth_note else cut
         save_context(
             storage,
             conversation_id,

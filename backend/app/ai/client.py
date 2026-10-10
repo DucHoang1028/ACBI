@@ -75,7 +75,7 @@ class Intent(BaseModel):
     end_date: str | None
     factory_id: int | None
     territory: str | None
-    limit: int = Field(ge=1, le=250)
+    limit: int = Field(ge=1, le=400)
     needs_clarification: bool
     clarification_question: str | None
     zero_scrap_only: bool

@@ -12,7 +12,7 @@ from app.presentation.charts import VizConfig, validate_viz
 from app.presentation.visualization import chart
 from app.query.builder import prepare
 from app.query.orchestrator import route_query
-from app.query.validation import SQLPolicyError, validate
+from app.query.validation import SQLPolicyError, row_cap, validate
 
 ANCHOR = date(2025, 6, 29)
 
@@ -267,3 +267,21 @@ def test_a_departure_from_the_approved_shape_is_sent_back_once_corrected() -> No
         "q", user_intent, "manager", ANCHOR, state, RequestBudget(30, 4)
     )
     assert path == "rag_text_to_sql" and fake.calls == 2
+
+
+def test_a_year_of_days_fits_in_a_generated_query_but_other_lists_stay_short() -> None:
+    assert row_cap(intent(dimension="day", limit=400)) == 400
+    assert row_cap(intent(dimension="sales_territory", limit=400)) == 100
+    assert (
+        row_cap(intent(dimension="month", series_dimension="product", limit=400)) == 250
+    )
+    day = intent("production_output", dimension="day", limit=400)
+    plan = replace(
+        prepare(day, "manager", ANCHOR),
+        sql=(
+            "SELECT w.enddate::date AS day,SUM(w.orderqty-w.scrappedqty) AS "
+            "production_output FROM production.workorder w "
+            "WHERE w.enddate>=:start AND w.enddate<:end GROUP BY 1 ORDER BY 1"
+        ),
+    )
+    assert "LIMIT 400" in validate(plan, day, "manager", generated=True).sql

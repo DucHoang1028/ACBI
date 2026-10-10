@@ -40,13 +40,16 @@ def truth_output(
     return None if rows is None else {str(d): float(v) for d, v in rows}
 
 
-def truth_defects(bucket: str, start: str, end: str) -> Rows | None:
+def truth_defects(
+    bucket: str, start: str, end: str, factory: bool = False
+) -> Rows | None:
     expr = (
         "date_trunc('week',w.enddate)::date" if bucket == "week" else "w.enddate::date"
     )
     rows = sql(
         f"SELECT {expr},SUM(w.scrappedqty)::numeric/NULLIF(SUM(w.orderqty),0) "
-        "FROM production.workorder w WHERE w.enddate>=%s AND w.enddate<%s GROUP BY 1",
+        "FROM production.workorder w WHERE w.enddate>=%s AND w.enddate<%s"
+        f"{' AND ' + FACTORY_A if factory else ''} GROUP BY 1",
         start,
         end,
     )
@@ -165,6 +168,77 @@ CASES: list[dict[str, Any]] = [
         "status": "needs_clarification",
     },
     {"id": "R14", "q": "Sản lượng theo tuần trong năm 2030", "status": "no_data"},
+    {
+        "id": "R15",
+        "q": "Weekly revenue in Q4 2024",
+        "metric": "revenue",
+        "bucket": "week",
+        "truth": lambda: truth_revenue("week", "2024-10-01", "2025-01-01"),
+    },
+    {
+        "id": "R16",
+        "q": "Doanh thu theo tuần của Australia trong quý 4 năm 2024",
+        "metric": "revenue",
+        "bucket": "week",
+        "truth": lambda: truth_revenue("week", "2024-10-01", "2025-01-01", "Australia"),
+    },
+    {
+        "id": "R17",
+        "q": "Tỷ lệ lỗi theo ngày của Factory A trong tháng 3 năm 2025",
+        "metric": "defect_rate",
+        "bucket": "day",
+        "truth": lambda: truth_defects("day", *MAR, factory=True),
+    },
+    {
+        "id": "R18",
+        "q": "Sản lượng theo ngày trong tháng 12 năm 2024",
+        "metric": "production_output",
+        "bucket": "day",
+        "truth": lambda: truth_output("day", "2024-12-01", "2025-01-01"),
+    },
+    {
+        "id": "R19",
+        "q": "Cho tôi sản lượng từng tuần của quý 2 năm 2024",
+        "metric": "production_output",
+        "bucket": "week",
+        "truth": lambda: truth_output("week", "2024-04-01", "2024-07-01"),
+    },
+    {
+        "id": "R20",
+        "q": "Tỷ lệ lỗi từng tuần trong tháng 1 năm 2025",
+        "metric": "defect_rate",
+        "bucket": "week",
+        "truth": lambda: truth_defects("week", "2025-01-01", "2025-02-01"),
+    },
+    {
+        "id": "R21",
+        "q": "Doanh thu mỗi tuần trong năm 2024",
+        "metric": "revenue",
+        "bucket": "week",
+        "truth": lambda: truth_revenue("week", "2024-01-01", "2025-01-01"),
+    },
+    {
+        "id": "R22",
+        "q": "Sản lượng theo ngày trong năm 2024",
+        "metric": "production_output",
+        "bucket": "day",
+        "truth": lambda: truth_output("day", "2024-01-01", "2025-01-01"),
+    },
+    {
+        "id": "R23",
+        "q": "Tỷ lệ lỗi theo tuần trong quý 1 năm 2025",
+        "role": "production_a",
+        "metric": "defect_rate",
+        "bucket": "week",
+        "truth": lambda: truth_defects("week", *Q1, factory=True),
+    },
+    {
+        "id": "R24",
+        "q": "Sản lượng Factory A theo tuần trong tháng 6 năm 2025",
+        "metric": "production_output",
+        "bucket": "week",
+        "truth": lambda: truth_output("week", "2025-06-01", "2025-06-30", factory=True),
+    },
 ]
 
 
