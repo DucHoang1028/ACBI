@@ -1288,6 +1288,23 @@ def answer_one(
                         ),
                     }
                 )
+            if vocabulary.get().match_metrics(fold(body.question)):
+                # A forecast that names its metric but no place is not the place of an
+                # earlier request in the same message that the model copied over.
+                said = vocabulary.get().match_members(fold(body.question))
+                named_factories = {
+                    vocabulary.get().ids("factory").get(n)
+                    for n in said.get("factory", [])
+                }
+                drop: dict[str, Any] = {}
+                if raw.territory and not set(raw.territory.split("|")) & set(
+                    said.get("sales_territory", [])
+                ):
+                    drop["territory"] = None
+                if raw.factory_id is not None and raw.factory_id not in named_factories:
+                    drop["factory_id"] = None
+                if drop:
+                    raw = raw.model_copy(update=drop)
             # "Was that based on total revenue?" names no period of its own:
             # it asks about the forecast just given, so do not compute again.
             # "Còn Pháp thì sao" names a place instead: that is a new forecast.

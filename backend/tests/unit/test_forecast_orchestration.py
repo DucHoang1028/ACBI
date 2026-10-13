@@ -538,3 +538,26 @@ def test_a_forecast_never_asks_how_many_months(monkeypatch: Any) -> None:
     )
     assert result["status"] == "ok"
     assert result["sources"]["forecast"]["horizon_months"] == 6
+
+
+def test_a_forecast_does_not_keep_a_place_the_model_copied_from_another_request(
+    monkeypatch: Any,
+) -> None:
+    patch_storage(monkeypatch)
+    question = "forecast revenue"
+    copied = intent(metric_id="revenue", intent_type="forecast", territory="Canada")
+    state = make_state(FakeLLM({question: copied}))
+    _, result = orchestrator.answer(
+        AskRequest(question=question, language="en"), USER, state
+    )
+    assert result["status"] == "ok"
+    assert "territory" not in state.storage.contexts[result["conversation_id"]]["slots"]
+    named = "forecast revenue for Canada"
+    state = make_state(FakeLLM({named: copied}))
+    _, result = orchestrator.answer(
+        AskRequest(question=named, language="en"), USER, state
+    )
+    assert (
+        state.storage.contexts[result["conversation_id"]]["slots"]["territory"]
+        == "Canada"
+    )
