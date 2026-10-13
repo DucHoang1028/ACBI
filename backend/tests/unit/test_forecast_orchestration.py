@@ -519,3 +519,22 @@ def test_a_period_the_model_made_up_is_asked_for_instead(monkeypatch: Any) -> No
     assert status == 200 and result["status"] == "needs_clarification"
     assert "period" in result["message"].lower() or "month" in result["message"].lower()
     assert not result["table"]
+
+
+def test_a_forecast_never_asks_how_many_months(monkeypatch: Any) -> None:
+    patch_storage(monkeypatch)
+    question = "forecast revenue"
+    asks_months = intent(
+        metric_id="revenue",
+        intent_type="forecast",
+        needs_clarification=True,
+        missing_fields=["horizon_months"],
+        clarification_question="How many months ahead?",
+    )
+    _, result = orchestrator.answer(
+        AskRequest(question=question, language="en"),
+        USER,
+        make_state(FakeLLM({question: asks_months})),
+    )
+    assert result["status"] == "ok"
+    assert result["sources"]["forecast"]["horizon_months"] == 6

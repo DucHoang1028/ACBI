@@ -1276,6 +1276,18 @@ def answer_one(
             )
             return 200, result
         if raw.intent_type == "forecast" and not comparing:
+            left = [f for f in raw.missing_fields if "horizon" not in f]
+            if len(left) != len(raw.missing_fields):
+                # How far ahead is optional (six months by default): never ask it.
+                raw = raw.model_copy(
+                    update={
+                        "missing_fields": left,
+                        "needs_clarification": bool(left),
+                        "clarification_question": (
+                            raw.clarification_question if left else None
+                        ),
+                    }
+                )
             # "Was that based on total revenue?" names no period of its own:
             # it asks about the forecast just given, so do not compute again.
             # "Còn Pháp thì sao" names a place instead: that is a new forecast.
