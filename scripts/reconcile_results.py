@@ -28,7 +28,7 @@ TERMINAL = (
     "LEFT JOIN acbi_demo.factory f ON f.factory_id=lf.factory_id)"
 )
 LABEL_YEAR = re.compile(r"^(?:Năm|Year)\s+(\d{4})$|^(\d{4})$")
-LABEL_QUARTER = re.compile(r"^(?:Quý|Quarter|Q)\s*([1-4])\s*/\s*(\d{4})$")
+LABEL_QUARTER = re.compile(r"^(?:Quý|Quarter|Q)\s*([1-4])\s*[/ ]\s*(\d{4})$")
 LABEL_MONTH = re.compile(r"^(?:Tháng|Month)\s*(\d{1,2})\s*/\s*(\d{4})$")
 
 
@@ -313,9 +313,14 @@ def reconcile(
             info["mismatches"].append((key, r[metric], "không có trong kho dữ liệu"))
         elif not close(r[metric], ref[key], metric):
             info["mismatches"].append((key, r[metric], ref[key]))
+    said_left_out = any(
+        w in str(result.get("answer_text") or "").lower()
+        for w in ("chưa gồm", "not included")
+    )
     if (
         group != "none"
         and len(rows) < len(ref)
+        and not said_left_out
         and not (isinstance(limit, int) and len(rows) >= limit)
     ):
         shown = {
