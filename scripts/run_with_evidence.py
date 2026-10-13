@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import verify_compare_multitask as M
 import verify_hard_cases as H
 import verify_rag_cases as R
+from reconcile_results import reconcile
 
 base, out = sys.argv[1].rstrip("/"), Path(sys.argv[2])
 ONLY = set(filter(None, os.environ.get("ONLY", "").split(",")))
@@ -24,6 +25,34 @@ EVENTS: list[dict] = []
 results: list[dict] = []
 original_call = M.call
 original_sql = H.sql
+
+
+def checks_for(question, result):
+    """Independent reconciliation of the main answer and of every part."""
+    out = []
+    for label, item in [("chính", result)] + [
+        (p.get("title") or "phần", p) for p in result.get("parts") or []
+    ]:
+        try:
+            v = reconcile(question, item, original_sql)
+        except Exception as error:  # a broken check must not hide the answer
+            v = {
+                "status": "Chưa đối chiếu",
+                "note": f"lỗi khi đối chiếu: {type(error).__name__}",
+                "sql": "",
+                "params": [],
+                "checked": 0,
+                "mismatches": [],
+            }
+        if v is not None:
+            out.append(
+                {
+                    "scope": label,
+                    **v,
+                    "mismatches": [[str(x) for x in m] for m in v["mismatches"]],
+                }
+            )
+    return out
 
 
 def call(b, path, body, token=None):
@@ -44,6 +73,7 @@ def call(b, path, body, token=None):
                 "llm_calls": result.get("llm_calls"),
                 "sql": (src.get("sql") or "")[:1800],
                 "parameters": src.get("parameters"),
+                "reconcile": checks_for(body.get("question") or "", result),
                 "parts": [
                     {
                         "title": p.get("title"),
@@ -119,6 +149,12 @@ def run(suite_name, cases, runner, question_of, role_of):
         started = time.time()
         errors = runner(item)
         events = list(EVENTS)
+        for e in events:
+            for rec in e.get("reconcile") or []:
+                if rec["mismatches"]:
+                    errors.append(
+                        f"đối chiếu độc lập lệch ({rec['scope']}): {rec['mismatches'][:3]}"
+                    )
         verdict = "PASS" if not errors else ("EXCLUDED" if busy(events) else "FAIL")
         out_rows.append(
             {

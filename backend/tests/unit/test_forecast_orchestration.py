@@ -561,3 +561,65 @@ def test_a_forecast_does_not_keep_a_place_the_model_copied_from_another_request(
         state.storage.contexts[result["conversation_id"]]["slots"]["territory"]
         == "Canada"
     )
+
+
+@pytest.mark.parametrize(
+    ("role", "question", "changes"),
+    [
+        (
+            "sales",
+            "Production output for Factory A",
+            dict(metric_id="production_output", period="last_month", factory_id=1),
+        ),
+        (
+            "sales",
+            "Forecast production output",
+            dict(metric_id="production_output", intent_type="forecast"),
+        ),
+        (
+            "production",
+            "Revenue last month",
+            dict(metric_id="revenue", period="last_month"),
+        ),
+        (
+            "production",
+            "Production output of Factory B",
+            dict(metric_id="production_output", period="last_month", factory_id=2),
+        ),
+        (
+            "it_admin",
+            "Revenue last month",
+            dict(metric_id="revenue", period="last_month"),
+        ),
+    ],
+)
+def test_a_refused_request_never_reaches_the_warehouse(
+    monkeypatch: Any, role: str, question: str, changes: dict[str, Any]
+) -> None:
+    patch_storage(monkeypatch)
+    ran: list[str] = []
+
+    def must_not_run(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        ran.append("run_query")
+        return []
+
+    monkeypatch.setattr(orchestrator, "run_query", must_not_run)
+    state = make_state(FakeLLM({question: intent(**changes)}))
+    status, result = orchestrator.answer(
+        AskRequest(question=question, language="en"), {"id": 2, "role": role}, state
+    )
+    assert status == 403 and result["status"] == "denied"
+    assert ran == [] and not result["table"]
+
+
+def test_a_comparison_of_two_factories_leaves_out_the_other_groups() -> None:
+    rows = [
+        {"factory": "Factory A", "production_output": 355197},
+        {"factory": "Factory B", "production_output": 80953},
+        {"factory": "Unassigned", "production_output": 1460227},
+    ]
+    kept, left = orchestrator.only_named_factories(rows, ["Factory A", "Factory B"])
+    assert [r["factory"] for r in kept] == ["Factory A", "Factory B"]
+    assert [r["factory"] for r in left] == ["Unassigned"]
+    assert orchestrator.only_named_factories(rows, ["Factory A"]) == (rows, [])
+    assert orchestrator.only_named_factories(rows, []) == (rows, [])

@@ -434,7 +434,7 @@ CASES = [
         [
             (
                 "so sánh sản lượng của Factory A với Factory B năm 2024",
-                dict(status="ok", rows=(2, 4)),
+                dict(status="ok", rows=2, has=("Factory A", "Factory B", "chưa gồm")),
                 None,
             )
         ],

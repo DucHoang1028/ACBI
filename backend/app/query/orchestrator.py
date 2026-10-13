@@ -331,6 +331,18 @@ def carry_slots(prior: dict[str, Any] | None, intent: Intent) -> dict[str, Any]:
     return slots
 
 
+def only_named_factories(
+    rows: list[dict[str, Any]], named: list[str]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """A comparison of named factories shows those factories, not every group."""
+    if len(named) < 2:
+        return rows, []
+    kept = [r for r in rows if str(r.get("factory")) in named]
+    if not kept or len(kept) == len(rows):
+        return rows, []
+    return kept, [r for r in rows if r not in kept]
+
+
 def shown_members(
     rows: list[dict[str, Any]], metric: str | None = None
 ) -> dict[str, Any]:
@@ -1756,6 +1768,22 @@ def answer_one(
             )
             return 200, response(outcome, question, request_id, conversation_id)
         rows = run_query(state.warehouse, plan, budget)
+        if intent.dimension == "factory" and rows:
+            said_members = vocabulary.get().match_members(fold(body.question))
+            rows, left_out = only_named_factories(rows, said_members.get("factory", []))
+            if left_out:
+                parts = [
+                    f"{r.get('factory')} "
+                    f"({money(Decimal(str(r.get(plan.metric_id))), body.language, 0)})"
+                    for r in left_out
+                ]
+                names = ", ".join(parts)
+                vi_note = f"Chỉ hiển thị các nhà máy bạn nêu; chưa gồm: {names}."
+                en_note = (
+                    f"Only the factories you named are shown; not included: {names}."
+                )
+                cut_note = vi_note if body.language == "vi" else en_note
+                growth_note = f"{growth_note} {cut_note}" if growth_note else cut_note
         if intent.series_dimension != "none" and len(rows) >= min(intent.limit, 250):
             outcome = "needs_clarification"
             question = (
