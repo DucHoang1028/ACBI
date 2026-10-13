@@ -1120,3 +1120,19 @@ def test_a_named_factory_is_a_filter_even_when_the_model_left_it_out() -> None:
     assert filled.factory_id == 1  # authorize() then refuses revenue by factory
     share = merged_intent(raw, None, "Factory A chiếm bao nhiêu phần trăm doanh thu")
     assert share.factory_id is None
+
+
+def test_amounts_of_earlier_answers_do_not_go_to_the_ai() -> None:
+    from app.conversation.service import without_figures
+
+    turns = [
+        {
+            "question": "Doanh thu theo khu vực năm 2024",
+            "answer": "Doanh thu từ 01/01/2024 đến 31/12/2024: cao nhất là Southwest "
+            "(9.121.931,65), thấp nhất là Southeast (2.399.100,5), tăng 11,7%.",
+        }
+    ]
+    shown = without_figures(turns)[0]["answer"]
+    assert "Southwest" in shown and "01/01/2024" in shown and "31/12/2024" in shown
+    assert "9.121.931" not in shown and "2.399" not in shown and "11,7" not in shown
+    assert turns[0]["answer"].count("9.121.931,65") == 1  # the saved copy is untouched

@@ -54,6 +54,7 @@ from app.conversation.service import (
     next_turns,
     remember_answer,
     save_context,
+    without_figures,
 )
 from app.core.dates import (
     COMPARE_WORDS,
@@ -1152,7 +1153,7 @@ def answer_one(
             "data_as_of": anchor.isoformat(),
             "slots": prior["slots"] if prior else {},
             "pending_question": prior.get("pending_question") if prior else None,
-            "turns": (prior or {}).get("turns") or [],
+            "turns": without_figures((prior or {}).get("turns") or []),
         }
         # A short reply that picks an offered option stands for that option's text.
         asked = (

@@ -1,6 +1,7 @@
 """Conversation Management: user-owned slots, turns and pending clarifications."""
 
 import json
+import re
 from typing import Any
 
 from sqlalchemy import Engine, text
@@ -91,3 +92,14 @@ def remember_answer(
         """),
             {"id": conversation_id, "user_id": user_id, "answer": answer_text[:400]},
         )
+
+
+FIGURE = re.compile(r"\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?%?|\d+[.,]\d+%?")
+
+
+def without_figures(turns: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Recent turns as the AI may see them: names and dates stay, result figures go.
+
+    "The top region" is resolved from a name, never from an amount, so no amount from
+    an earlier answer needs to leave the company."""
+    return [{**t, "answer": FIGURE.sub("[số]", t.get("answer") or "")} for t in turns]
