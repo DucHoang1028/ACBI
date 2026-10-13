@@ -822,7 +822,10 @@ class GroqClient:
             if error is None:
                 continue
             if not isinstance(error, ValueError):
-                if isinstance(error, httpx.HTTPStatusError) and limited:
+                if isinstance(error, httpx.HTTPStatusError) and (
+                    limited or error.response.status_code >= 500
+                ):
+                    # Rate limited, or overloaded: a retry in a moment will do.
                     raise LLMBusy("Every Groq key is rate limited") from error
                 raise error  # every usable key failed
             if attempt >= self.regenerations or budget.calls >= budget.max_calls:

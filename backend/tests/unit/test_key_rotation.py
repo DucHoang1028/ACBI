@@ -401,3 +401,11 @@ def test_a_403_that_names_a_limit_is_a_wait_not_a_broken_key(
     [item] = groq.status()
     assert item["state"] == "resting"
     assert item["back_in_seconds"] <= rests and item["back_in_seconds"] >= rests - 10
+
+
+def test_a_provider_that_is_overloaded_reads_as_a_busy_ai(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    groq, _ = two_providers(monkeypatch, {"m1": 503, "g1": 503, "ollama": 503})
+    with pytest.raises(LLMBusy):
+        ask_as(groq, None)
