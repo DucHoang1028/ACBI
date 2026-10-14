@@ -6,7 +6,7 @@ model, so a sentence here can always be checked against the table beside it.
 
 import calendar
 import re
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -306,13 +306,48 @@ def analyze(
     )
 
 
-def highlights(metric: str, rows: list[dict[str, Any]], language: str) -> str | None:
-    """Two short observations for a breakdown: extremes, then spread or trend."""
+def part_weeks(
+    rows: list[dict[str, Any]], label: str, start: date, end: date
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Weekly rows split into (full weeks, week starts that only part-fill the period).
+
+    Rows count as weekly when their dates are ordered and seven days apart; the first
+    and last week of a period seldom have seven days in it, so they are no point to
+    compare. Anything else comes back unchanged."""
+    stamps = [str(r.get(label)) for r in rows]
+    if len(rows) < 3 or not all(re.fullmatch(r"\d{4}-\d{2}-\d{2}", s) for s in stamps):
+        return rows, []
+    days = [date.fromisoformat(s) for s in stamps]
+    if any((b - a).days != 7 for a, b in zip(days, days[1:])):
+        return rows, []
+    full = [d >= start and d + timedelta(days=7) <= end for d in days]
+    return (
+        [r for r, ok in zip(rows, full) if ok],
+        [s for s, ok in zip(stamps, full) if not ok],
+    )
+
+
+def highlights(
+    metric: str,
+    rows: list[dict[str, Any]],
+    language: str,
+    start: date | None = None,
+    end: date | None = None,
+) -> str | None:
+    """Two short observations for a breakdown: extremes, then spread or trend.
+
+    With the query's period (`end` exclusive), weeks that only part-fill it are left
+    out of every comparison and named in a note."""
     vi = language == "vi"
     cols = columns(rows, metric)
     if cols is None or len(rows) < 2:
         return None
     label, value = cols
+    part: list[str] = []
+    if start and end:
+        rows, part = part_weeks(rows, label, start, end)
+        if part and len(rows) < 2:
+            return None  # too few full weeks to compare: the table says it all
     pairs = ranked(rows, label, value)
     if len(pairs) < 2:
         return None
@@ -343,6 +378,14 @@ def highlights(metric: str, rows: list[dict[str, Any]], language: str) -> str | 
         if vi
         else f"Highest is {show(top)}, lowest is {show(bottom)}."
     )
+    if part:
+        names = ", ".join(label_text(label, s, language) for s in part)
+        text += (
+            f" (Tuần bắt đầu {names} chưa đủ 7 ngày trong kỳ nên không tính.)"
+            if vi
+            else f" (The weeks starting {names} do not fill 7 days of the period, "
+            "so they are left out.)"
+        )
     temporal = describe(rows)["columns"][label]["kind"] == "temporal"
     if temporal:
         ordered = [

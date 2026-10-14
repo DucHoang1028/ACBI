@@ -845,6 +845,31 @@ def test_a_month_the_data_stops_inside_is_left_out_of_the_trend() -> None:
     assert text is not None and "chưa đủ tháng" in text and "tăng 10,0%" in text
 
 
+def test_part_weeks_of_the_period_are_left_out_of_every_comparison() -> None:
+    from datetime import date
+
+    from app.presentation import analysis
+
+    rows = [  # March 2025: the week of 24/02 has 2 days in it, the week of 31/03 has 1
+        {"week": "2025-02-24", "revenue": "118746.16"},
+        {"week": "2025-03-03", "revenue": "346462.59"},
+        {"week": "2025-03-10", "revenue": "308973.20"},
+        {"week": "2025-03-17", "revenue": "411465.70"},
+        {"week": "2025-03-24", "revenue": "3767708.93"},
+        {"week": "2025-03-31", "revenue": "34544.95"},
+    ]
+    start, end = date(2025, 3, 1), date(2025, 4, 1)
+    text = analysis.highlights("revenue", rows, "vi", start, end)
+    assert text is not None
+    assert "Cao nhất là 24/03/2025" in text and "thấp nhất là 10/03/2025" in text
+    assert "Tuần bắt đầu 24/02/2025, 31/03/2025 chưa đủ 7 ngày" in text
+    assert "Từ 03/03/2025 đến 24/03/2025" in text and "34.544,95" not in text
+    # Without the period nothing is dropped; too few full weeks leave the table alone.
+    assert "31/03/2025" in (analysis.highlights("revenue", rows, "vi") or "")
+    short = analysis.highlights("revenue", rows[:3], "vi", start, date(2025, 3, 10))
+    assert short is None
+
+
 def test_a_leading_clause_without_a_metric_does_not_split_the_question() -> None:
     from app.conversation.intent import split_tasks
 

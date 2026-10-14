@@ -71,7 +71,8 @@ def factual(
             )
         head = f"{label} ({scope})" if scope else label
         return f"{head} từ {period_vi}: {len(rows)} nhóm. " + (
-            highlights(metric_id, rows, "vi") or "Chi tiết trong bảng bên dưới."
+            highlights(metric_id, rows, "vi", start, end)
+            or "Chi tiết trong bảng bên dưới."
         )
     period = f"{start.isoformat()} to {(end - timedelta(days=1)).isoformat()}"
     label = vocab.metric_label(metric_id, "en")
@@ -92,7 +93,7 @@ def factual(
         )
     head = f"{label} ({scope})" if scope else label
     return f"{head} for {period}: {len(rows)} groups. " + (
-        highlights(metric_id, rows, "en") or "Values are in the table."
+        highlights(metric_id, rows, "en", start, end) or "Values are in the table."
     )
 
 
