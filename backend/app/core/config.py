@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,6 +21,9 @@ class Settings(BaseSettings):
     app_db_password: SecretStr
     app_db_name: str = "acbi"
     data_as_of: date | None = None
+    # Relative periods ("this year", "last month") count from today in Vietnam
+    # ("today") or from the last day of the data ("data").
+    relative_dates_from: Literal["today", "data"] = "today"
     data_dir: str = "data"
     llm_provider: str = "groq"
     llm_model: str = "openai/gpt-oss-120b"

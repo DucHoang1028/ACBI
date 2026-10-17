@@ -673,6 +673,38 @@ def test_a_relative_period_that_repeats_the_last_answer_says_so() -> None:
     assert say(relative, other, "còn năm ngoái?") is None
 
 
+def test_relative_periods_count_from_today_unless_set_to_the_data() -> None:
+    from datetime import date, datetime
+    from types import SimpleNamespace
+
+    from app.query.orchestrator import VIETNAM, reference_date
+
+    data_end = date(2025, 6, 29)
+    today = reference_date(SimpleNamespace(relative_dates_from="today"), data_end)
+    assert today == datetime.now(VIETNAM).date() and today != data_end
+    pinned = reference_date(SimpleNamespace(relative_dates_from="data"), data_end)
+    assert pinned == data_end
+
+
+def test_a_period_past_the_data_says_where_the_data_stops() -> None:
+    from datetime import date
+
+    from app.query.orchestrator import coverage_note
+
+    end = date(2025, 6, 29)
+    inside = coverage_note(date(2024, 1, 1), date(2025, 1, 1), end, "revenue", "vi")
+    assert inside is None
+    none_at_all = coverage_note(date(2026, 1, 1), date(2026, 10, 19), end, None, "vi")
+    assert none_at_all is not None
+    assert "đến 29/06/2025" in none_at_all and "chưa có dữ liệu" in none_at_all
+    partial = coverage_note(date(2025, 1, 1), date(2026, 1, 1), end, None, "vi")
+    assert partial is not None and "chưa đầy đủ" in partial
+    english = coverage_note(date(2026, 1, 1), date(2026, 10, 19), end, None, "en")
+    assert (
+        english == "The data runs to 2025-06-29, so there is no data for this period."
+    )
+
+
 def test_same_period_last_year_and_the_one_before_move_the_period_on_screen() -> None:
     from datetime import date
 

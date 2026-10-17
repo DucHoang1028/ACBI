@@ -444,15 +444,48 @@ def repeated_period_note(
     last = plan.end - timedelta(days=1)
     if language == "vi":
         return (
-            "Lưu ý: kỳ tương đối được tính theo ngày dữ liệu mới nhất "
-            f"({anchor:%d/%m/%Y}), nên kỳ này trùng với kỳ của câu trước "
+            f"Lưu ý: kỳ tương đối được tính từ ngày {anchor:%d/%m/%Y}, "
+            "nên kỳ này trùng với kỳ của câu trước "
             f"({plan.start:%d/%m/%Y} đến "
             f"{last:%d/%m/%Y}). Muốn xem kỳ trước đó nữa, hãy nêu rõ năm hoặc tháng."
         )
     return (
-        f"Note: a relative period counts from the latest data date ({anchor}), so this "
-        f"is the same period as the answer before ({plan.start} to {last}). To see an "
-        "earlier one, name the year or month."
+        f"Note: a relative period counts from {anchor}, so this is the same period "
+        f"as the answer before ({plan.start} to {last}). To see an earlier one, "
+        "name the year or month."
+    )
+
+
+VIETNAM = timezone(timedelta(hours=7))
+
+
+def reference_date(settings: Any, data_end: date) -> date:
+    """The day relative periods count from: today in Vietnam, or the data's last day."""
+    if settings.relative_dates_from == "data":
+        return data_end
+    return datetime.now(VIETNAM).date()
+
+
+def coverage_note(
+    start: date, end: date, data_end: date, metric_id: str | None, language: str
+) -> str | None:
+    """The period asked for runs past the data: say where the data stops."""
+    span = vocabulary.get().coverage.get(metric_id or "")
+    last_data = date.fromisoformat(span[1]) if span else data_end
+    if end - timedelta(days=1) <= last_data:
+        return None
+    if language == "vi":
+        return (
+            f"Dữ liệu hiện có đến {last_data:%d/%m/%Y}, "
+            "nên chưa có dữ liệu cho kỳ này."
+            if start > last_data
+            else f"Dữ liệu hiện chỉ có đến {last_data:%d/%m/%Y}, "
+            "nên kỳ này chưa đầy đủ."
+        )
+    return (
+        f"The data runs to {last_data}, so there is no data for this period."
+        if start > last_data
+        else f"The data only runs to {last_data}, so this period is incomplete."
     )
 
 
@@ -815,7 +848,8 @@ def run_forecast(
             },
             "retrieved_at": datetime.now(timezone.utc).isoformat(),
             "metric_versions": {metric: plan.version},
-            "data_as_of": anchor.isoformat(),
+            "data_as_of": state.readiness["data_as_of"],
+            "reference_date": anchor.isoformat(),
             "anchor_source": state.readiness["anchor_source"],
             "references": [],
             "forecast": {
@@ -961,6 +995,15 @@ def run_comparison(
         bool(re.search(RANKING_WORDS, fold(body.question))),
         top_n(body.question),
     )
+    gap = coverage_note(
+        min(p[1] for p in periods),
+        max(p[2] for p in periods),
+        date.fromisoformat(state.readiness["data_as_of"]),
+        metric_id,
+        body.language,
+    )
+    if gap:
+        answer_text = f"{answer_text} {gap}"
     payload = response(
         "ok" if table else "no_data",
         "Results found" if table else "No data for these periods",
@@ -977,7 +1020,8 @@ def run_comparison(
         | {"start": periods[0][1].isoformat(), "end": periods[-1][2].isoformat()},
         "retrieved_at": datetime.now(timezone.utc).isoformat(),
         "metric_versions": {metric_id: plans[-1].version},
-        "data_as_of": anchor.isoformat(),
+        "data_as_of": state.readiness["data_as_of"],
+        "reference_date": anchor.isoformat(),
         "anchor_source": state.readiness["anchor_source"],
         "references": [],
     }
@@ -1144,7 +1188,8 @@ def answer_one(
             )
         listed = {p["id"] for p in getattr(client, "status", lambda: [])()}
         budget.provider = body.llm_provider if body.llm_provider in listed else None
-        anchor = date.fromisoformat(state.readiness["data_as_of"])
+        data_end = date.fromisoformat(state.readiness["data_as_of"])
+        anchor = reference_date(settings, data_end)
         target = reshape_kind(body.question)
         follow = None if target else analysis_kind(body.question)
         if follow and not re.search(metric_words(), fold(body.question)):
@@ -1470,7 +1515,7 @@ def answer_one(
                     user,
                     state,
                     budget,
-                    anchor,
+                    data_end,  # a forecast continues the recorded data, not the clock
                     request_id,
                     conversation_id,
                     prior,
@@ -1998,7 +2043,8 @@ def answer_one(
                 },
                 "retrieved_at": datetime.now(timezone.utc).isoformat(),
                 "metric_versions": {plan.metric_id: plan.version},
-                "data_as_of": anchor.isoformat(),
+                "data_as_of": state.readiness["data_as_of"],
+                "reference_date": anchor.isoformat(),
                 "anchor_source": state.readiness["anchor_source"],
                 "references": references,
             },
@@ -2037,6 +2083,9 @@ def answer_one(
             metric_change_note(prior, intent, body.question, body.language),
             repeated_period_note(
                 prior, intent, plan, anchor, body.question, body.language
+            ),
+            coverage_note(
+                plan.start, plan.end, data_end, plan.metric_id, body.language
             ),
         ):
             if added:

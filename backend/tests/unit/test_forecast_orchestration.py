@@ -132,6 +132,7 @@ def make_state(llm: FakeLLM) -> SimpleNamespace:
         app_db_password="x",
         local_intent_enabled=False,
         external_metadata_enabled=False,
+        relative_dates_from="data",  # the fixtures are dated to the data
     )
     return SimpleNamespace(
         settings=settings,
