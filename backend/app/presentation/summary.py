@@ -36,8 +36,12 @@ def factual(
     end: date,
     language: str = "en",
     scope: str = "",
+    cut: bool = False,
 ) -> str:
-    """The plain summary; `scope` names the territory or factory filter, if any."""
+    """The plain summary; `scope` names the territory or factory filter, if any.
+
+    `cut` says the rows are only the first part of a longer list, so no figure may
+    read as a whole-result total."""
     vocab = vocabulary.get()
     ratio = metric_id in vocab.ratio_metrics()
     metric = vocab.metrics.get(metric_id)
@@ -70,8 +74,9 @@ def factual(
                 f"{formatted}{suffix}."
             )
         head = f"{label} ({scope})" if scope else label
-        return f"{head} từ {period_vi}: {len(rows)} nhóm. " + (
-            highlights(metric_id, rows, "vi", start, end)
+        first = " đầu tiên" if cut else ""
+        return f"{head} từ {period_vi}: {len(rows)} nhóm{first}. " + (
+            highlights(metric_id, rows, "vi", start, end, cut)
             or "Chi tiết trong bảng bên dưới."
         )
     period = f"{start.isoformat()} to {(end - timedelta(days=1)).isoformat()}"
@@ -92,8 +97,9 @@ def factual(
             f"for {period}."
         )
     head = f"{label} ({scope})" if scope else label
-    return f"{head} for {period}: {len(rows)} groups. " + (
-        highlights(metric_id, rows, "en", start, end) or "Values are in the table."
+    first = "the first " if cut else ""
+    return f"{head} for {period}: {first}{len(rows)} groups. " + (
+        highlights(metric_id, rows, "en", start, end, cut) or "Values are in the table."
     )
 
 

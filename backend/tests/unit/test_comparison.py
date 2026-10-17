@@ -545,6 +545,63 @@ def test_a_filtered_breakdown_names_its_scope() -> None:
     )
 
 
+def test_a_cut_list_does_not_call_its_shown_rows_the_total() -> None:
+    from datetime import date
+
+    from app.presentation.summary import factual
+
+    rows = [
+        {"product": "A", "revenue": "50.00"},
+        {"product": "B", "revenue": "30.00"},
+        {"product": "C", "revenue": "20.00"},
+    ]
+    args = ("revenue", rows, date(2024, 1, 1), date(2025, 1, 1), "vi")
+    whole = factual(*args)
+    assert "3 nhóm. " in whole and "Trong số này" not in whole
+    assert "trong tổng 100,00." in whole
+    cut = factual(*args, "", True)
+    assert "3 nhóm đầu tiên." in cut and "Trong số này, cao nhất" in cut
+    assert "trong tổng 100,00 của các nhóm này." in cut
+
+
+def test_a_factory_outside_the_role_is_said_so_not_dropped_silently() -> None:
+    import pytest
+    from app.ai.client import Intent
+    from app.query.orchestrator import check_named_factories, factory_notes
+
+    def factory_intent(factory_id: int | None = None) -> Intent:
+        return Intent.model_validate(
+            {
+                "metric_id": "production_output",
+                "dimension": "factory",
+                "period": "this_year",
+                "start_date": None,
+                "end_date": None,
+                "factory_id": factory_id,
+                "territory": None,
+                "limit": 100,
+                "needs_clarification": False,
+                "clarification_question": None,
+                "zero_scrap_only": False,
+            }
+        )
+
+    only_a = [{"factory": "Factory A", "production_output": 5}]
+    ask = "So sánh sản lượng Factory A và Factory B"
+    note = factory_notes(only_a, ask, "production", "vi")
+    assert note == "Factory B nằm ngoài phạm vi quyền của bạn nên không được hiển thị."
+    assert factory_notes(only_a, ask, "manager", "vi") == (
+        "Không có dữ liệu của Factory B trong kỳ này."
+    )
+    assert factory_notes(only_a, "Sản lượng theo nhà máy", "production", "vi") is None
+    check_named_factories(factory_intent(), ask, "production")  # A is in scope
+    check_named_factories(factory_intent(), ask, "manager")
+    with pytest.raises(PermissionError):  # only factories the role cannot see
+        check_named_factories(
+            factory_intent(), "So sánh sản lượng Factory B và Factory C", "production"
+        )
+
+
 def test_same_period_last_year_and_the_one_before_move_the_period_on_screen() -> None:
     from datetime import date
 

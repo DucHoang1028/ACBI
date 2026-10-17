@@ -17,6 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.ai.budget import BudgetExceeded, RequestBudget
 from app.ai.client import FakeLLM, Intent, LLMBusy, dimension_ids
+from app.auth.service import allows
 from app.conversation.dialogue import (
     chat_intent,
     fallback,
@@ -341,6 +342,49 @@ def only_named_factories(
     if not kept or len(kept) == len(rows):
         return rows, []
     return kept, [r for r in rows if r not in kept]
+
+
+def named_factories(question: str) -> dict[str, int | None]:
+    """The factories a question names, with their ids."""
+    ids = vocabulary.get().ids("factory")
+    said = vocabulary.get().match_members(fold(question)).get("factory", [])
+    return {name: ids.get(name) for name in said}
+
+
+def check_named_factories(intent: Intent, question: str, role: str) -> None:
+    """Naming only factories the role may not see is a denial, as for one factory."""
+    if intent.dimension != "factory" or intent.factory_id is not None:
+        return
+    named = named_factories(question)
+    if named and not any(allows(role, "production", fid) for fid in named.values()):
+        raise PermissionError("Factory outside your scope")
+
+
+def factory_notes(
+    rows: list[dict[str, Any]], question: str, role: str, language: str
+) -> str | None:
+    """Why a factory the question names is missing from the result."""
+    shown = {str(r.get("factory")) for r in rows}
+    missing = {n: f for n, f in named_factories(question).items() if n not in shown}
+    barred = [n for n, f in missing.items() if not allows(role, "production", f)]
+    empty = [n for n in missing if n not in barred]
+    vi = language == "vi"
+    notes = []
+    if barred:
+        names = ", ".join(barred)
+        notes.append(
+            f"{names} nằm ngoài phạm vi quyền của bạn nên không được hiển thị."
+            if vi
+            else f"{names} is outside your access scope, so it is not shown."
+        )
+    if empty:
+        names = ", ".join(empty)
+        notes.append(
+            f"Không có dữ liệu của {names} trong kỳ này."
+            if vi
+            else f"There is no data for {names} in this period."
+        )
+    return " ".join(notes) or None
 
 
 def shown_members(
@@ -1719,6 +1763,7 @@ def answer_one(
             )
         try:
             check_definition(intent, state.dictionary)
+            check_named_factories(intent, body.question, user["role"])
             plan, query_path, references = route_query(
                 body.question, intent, user["role"], anchor, state, budget
             )
@@ -1784,6 +1829,8 @@ def answer_one(
                 )
                 cut_note = vi_note if body.language == "vi" else en_note
                 growth_note = f"{growth_note} {cut_note}" if growth_note else cut_note
+            if note := factory_notes(rows, body.question, user["role"], body.language):
+                growth_note = f"{growth_note} {note}" if growth_note else note
         if intent.series_dimension != "none" and len(rows) >= min(intent.limit, 250):
             outcome = "needs_clarification"
             question = (
@@ -1821,7 +1868,9 @@ def answer_one(
             if whole_rows and whole_rows[0].get(plan.metric_id) is not None:
                 whole = Decimal(str(whole_rows[0][plan.metric_id]))
         outcome = "ok" if rows else "no_data"
-        if rows and len(rows) >= row_cap(intent) and not top_n(body.question):
+        capped = bool(rows) and len(rows) >= row_cap(intent)
+        capped = capped and not top_n(body.question)
+        if capped:
             cut = (
                 f"Chỉ hiển thị {len(rows)} dòng đầu tiên; còn dòng khác chưa hiển "
                 "thị. Hãy thu hẹp khoảng thời gian hoặc nhóm để xem đủ."
@@ -1867,6 +1916,7 @@ def answer_one(
                     plan.end,
                     body.language,
                     scope_of(intent),
+                    capped,
                 )
             ),
             sources={

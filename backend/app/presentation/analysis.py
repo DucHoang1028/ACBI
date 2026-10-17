@@ -333,11 +333,13 @@ def highlights(
     language: str,
     start: date | None = None,
     end: date | None = None,
+    cut: bool = False,
 ) -> str | None:
     """Two short observations for a breakdown: extremes, then spread or trend.
 
     With the query's period (`end` exclusive), weeks that only part-fill it are left
-    out of every comparison and named in a note."""
+    out of every comparison and named in a note. With `cut` the rows are the first
+    part of a longer list: extremes and shares are said to hold among them only."""
     vi = language == "vi"
     cols = columns(rows, metric)
     if cols is None or len(rows) < 2:
@@ -373,10 +375,13 @@ def highlights(
             f"{amount(top[1] - bottom[1], metric, language)}"
             + (f" (+{rel})." if rel else ".")
         )
+    among = (" của các nhóm này" if vi else " of these groups") if cut else ""
     text = (
-        f"Cao nhất là {show(top)}, thấp nhất là {show(bottom)}."
+        f"{'Trong số này, c' if cut else 'C'}ao nhất là {show(top)}, "
+        f"thấp nhất là {show(bottom)}."
         if vi
-        else f"Highest is {show(top)}, lowest is {show(bottom)}."
+        else f"{'Among them, h' if cut else 'H'}ighest is {show(top)}, "
+        f"lowest is {show(bottom)}."
     )
     if part:
         names = ", ".join(label_text(label, s, language) for s in part)
@@ -426,10 +431,10 @@ def highlights(
             text += (
                 f" {label_text(label, top[0], language)} chiếm "
                 f"{percent(top[1] / total * 100, language)} trong tổng "
-                f"{money(total, language)}."
+                f"{money(total, language)}{among}."
                 if vi
                 else f" {label_text(label, top[0], language)} makes up "
                 f"{percent(top[1] / total * 100, language)} of the "
-                f"{money(total, language)} total."
+                f"{money(total, language)} total{among}."
             )
     return text
