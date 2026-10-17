@@ -387,6 +387,75 @@ def factory_notes(
     return " ".join(notes) or None
 
 
+def metric_change_note(
+    prior: dict[str, Any] | None, intent: Intent, question: str, language: str
+) -> str | None:
+    """A follow-up that names no metric but ends up on another one says so."""
+    vocab = vocabulary.get()
+    before = ((prior or {}).get("slots") or {}).get("metric_id")
+    if (
+        before not in vocab.metrics
+        or not intent.metric_id
+        or before == intent.metric_id
+        or vocab.match_metrics(fold(question))
+    ):
+        return None
+    old, new = (
+        vocab.metric_label(m, language).lower() for m in (before, intent.metric_id)
+    )
+    split = (
+        intent.territory and "sales_territory" not in vocab.metrics[before].dimensions
+    )
+    if language == "vi":
+        why = f" ({old} không chia theo khu vực)" if split else ""
+        return (
+            f"Lưu ý: câu hỏi không nêu chỉ số nên tôi chuyển từ {old} sang {new}{why}."
+        )
+    why = f" ({old} is not split by territory)" if split else ""
+    return (
+        f"Note: the question names no metric, so I switched from {old} to {new}{why}."
+    )
+
+
+def repeated_period_note(
+    prior: dict[str, Any] | None,
+    intent: Intent,
+    plan: ValidatedQuery,
+    anchor: date,
+    question: str,
+    language: str,
+) -> str | None:
+    """A relative period ("năm ngoái") that lands on the period just answered."""
+    slots = (prior or {}).get("slots") or {}
+    if (
+        not slots.get("period")
+        or slots.get("metric_id") != intent.metric_id
+        or intent.period in (None, "explicit")
+        or not mentions_time(question)
+    ):
+        return None
+    kept = {k: slots.get(k) for k in ("period", "start_date", "end_date")}
+    try:
+        before = resolve_dates(intent.model_copy(update=kept), anchor)
+    except ValueError:
+        return None
+    if before != (plan.start, plan.end):
+        return None
+    last = plan.end - timedelta(days=1)
+    if language == "vi":
+        return (
+            "Lưu ý: kỳ tương đối được tính theo ngày dữ liệu mới nhất "
+            f"({anchor:%d/%m/%Y}), nên kỳ này trùng với kỳ của câu trước "
+            f"({plan.start:%d/%m/%Y} đến "
+            f"{last:%d/%m/%Y}). Muốn xem kỳ trước đó nữa, hãy nêu rõ năm hoặc tháng."
+        )
+    return (
+        f"Note: a relative period counts from the latest data date ({anchor}), so this "
+        f"is the same period as the answer before ({plan.start} to {last}). To see an "
+        "earlier one, name the year or month."
+    )
+
+
 def shown_members(
     rows: list[dict[str, Any]], metric: str | None = None
 ) -> dict[str, Any]:
@@ -1829,8 +1898,9 @@ def answer_one(
                 )
                 cut_note = vi_note if body.language == "vi" else en_note
                 growth_note = f"{growth_note} {cut_note}" if growth_note else cut_note
-            if note := factory_notes(rows, body.question, user["role"], body.language):
-                growth_note = f"{growth_note} {note}" if growth_note else note
+            lost = factory_notes(rows, body.question, user["role"], body.language)
+            if lost:
+                growth_note = f"{growth_note} {lost}" if growth_note else lost
         if intent.series_dimension != "none" and len(rows) >= min(intent.limit, 250):
             outcome = "needs_clarification"
             question = (
@@ -1963,6 +2033,14 @@ def answer_one(
                 except (httpx.HTTPError, RuntimeError, ValueError, KeyError):
                     logger.warning("Request %s summary fell back", request_id)
         result["llm_calls"] = budget.calls
+        for added in (
+            metric_change_note(prior, intent, body.question, body.language),
+            repeated_period_note(
+                prior, intent, plan, anchor, body.question, body.language
+            ),
+        ):
+            if added:
+                growth_note = f"{growth_note} {added}" if growth_note else added
         if growth_note:
             result["answer_text"] = f"{result['answer_text']} {growth_note}"
         persist(

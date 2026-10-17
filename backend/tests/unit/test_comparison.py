@@ -602,6 +602,77 @@ def test_a_factory_outside_the_role_is_said_so_not_dropped_silently() -> None:
         )
 
 
+def _intent(**over: object) -> object:
+    from app.ai.client import Intent
+
+    base: dict[str, object] = {
+        "metric_id": "revenue",
+        "dimension": "none",
+        "period": "explicit",
+        "start_date": "2024-01-01",
+        "end_date": "2025-01-01",
+        "factory_id": None,
+        "territory": None,
+        "limit": 100,
+        "needs_clarification": False,
+        "clarification_question": None,
+        "zero_scrap_only": False,
+    }
+    return Intent.model_validate(base | over)
+
+
+def test_a_follow_up_that_changes_the_metric_says_so() -> None:
+    from app.query.orchestrator import metric_change_note
+
+    prior = {"slots": {"metric_id": "defect_rate", "period": "explicit"}}
+    now = _intent(territory="Canada")
+    note = metric_change_note(prior, now, "còn Canada thì sao?", "vi")
+    assert note is not None
+    assert "từ tỷ lệ phế phẩm sang doanh thu" in note
+    assert "không chia theo khu vực" in note
+    named = metric_change_note(prior, now, "còn doanh thu của Canada?", "vi")
+    assert named is None  # the question names its metric
+    same = {"slots": {"metric_id": "revenue"}}
+    assert metric_change_note(same, now, "còn Canada thì sao?", "vi") is None
+    assert metric_change_note(None, now, "còn Canada thì sao?", "vi") is None
+
+
+def test_a_relative_period_that_repeats_the_last_answer_says_so() -> None:
+    from datetime import date
+
+    from app.query.orchestrator import repeated_period_note
+    from app.query.validation import ValidatedQuery
+
+    anchor = date(2025, 6, 29)
+    metric = "production_output"
+    plan = ValidatedQuery("", {}, metric, date(2024, 1, 1), date(2025, 1, 1), 1)
+    other = ValidatedQuery("", {}, metric, date(2023, 1, 1), date(2024, 1, 1), 1)
+    prior = {
+        "slots": {
+            "metric_id": metric,
+            "period": "explicit",
+            "start_date": "2024-01-01",
+            "end_date": "2025-01-01",
+        }
+    }
+    relative = _intent(
+        metric_id=metric, period="last_year", start_date=None, end_date=None
+    )
+
+    def say(intent: object, query: ValidatedQuery, question: str) -> str | None:
+        return repeated_period_note(prior, intent, query, anchor, question, "vi")  # type: ignore[arg-type]
+
+    note = say(relative, plan, "còn năm ngoái thì sao?")
+    assert note is not None
+    assert "29/06/2025" in note and "01/01/2024 đến 31/12/2024" in note
+    # a follow-up that names no period only inherits one
+    assert say(relative, plan, "còn Canada thì sao?") is None
+    # a named year is an explicit period, not a relative one
+    assert say(_intent(metric_id=metric), plan, "còn năm 2024?") is None
+    # a relative period that lands elsewhere needs no note
+    assert say(relative, other, "còn năm ngoái?") is None
+
+
 def test_same_period_last_year_and_the_one_before_move_the_period_on_screen() -> None:
     from datetime import date
 
