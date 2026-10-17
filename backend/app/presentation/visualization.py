@@ -65,6 +65,8 @@ def reshape_kind(question: str) -> str | None:
         r"\b(?:so sanh|compare|nam ngoai|thang truoc|quy truoc|nam \d{4})\b", value
     ):
         return None  # it names something to fetch: a new question, not a redraw
+    if vocabulary.get().match_dimensions(value):
+        return None  # "pie of all 3 factories" asks for a split the result lacks
     return requested_chart(question)
 
 

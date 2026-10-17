@@ -801,6 +801,14 @@ def test_redraw_requests_and_new_questions_are_told_apart() -> None:
     assert reshape_kind("vẽ tròn cho dễ nhìn") == "pie"
     assert reshape_kind("so sánh Đức với Pháp năm ngoái rồi vẽ biểu đồ tròn") is None
     assert reshape_kind("đổi sang biểu đồ cột cho Canada") is None
+    # naming a breakdown asks for a new split, so it is not a redraw of the old rows
+    assert reshape_kind("vậy cho tôi biểu đồ tròn của cả 3 Factory đi") is None
+    assert reshape_kind("vẽ biểu đồ tròn theo nhà máy") is None
+    assert reshape_kind("vẽ biểu đồ tròn theo khu vực") is None
+    # a plain redraw of what is on screen stays a redraw
+    question = "ý tôi là có dữ liệu nào thể hiện dưới dạng biểu đồ tròn không"
+    assert reshape_kind(question) == "pie"
+    assert reshape_kind("đổi sang biểu đồ cột") == "bar"
 
 
 def test_which_factory_question_drops_the_factory_filter() -> None:
