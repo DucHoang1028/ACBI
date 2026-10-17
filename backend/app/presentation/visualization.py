@@ -14,7 +14,7 @@ from app.metadata import vocabulary
 from app.presentation.charts import TABLE, VizConfig, describe, validate_viz
 
 CHART_WORDS = (
-    r"\b(?:bieu do|chart|kpi|the chi so|kieu|as a|table|stacked|scatter|"
+    r"\b(?:bieu do|chart|kpi|the chi so|kieu|as a|table|stacked|scatter|phan tan|"
     r"dang (?:bieu do|bang|cot|duong|tron|vanh|xep|diem)|"
     r"(?:ve|chuyen sang|doi sang|doi thanh|hien thi|xem) (?:dang )?"
     r"(?:duong|cot|tron|vanh khuyen|bang|phan tan|line|pie|bar|donut))\b"

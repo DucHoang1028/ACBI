@@ -144,6 +144,7 @@ def test_all_chart_types_are_recognised_and_mapped() -> None:
         "Đổi sang biểu đồ vành khuyên": "donut",
         "Biểu đồ cột chồng doanh thu": "stacked_bar",
         "Vẽ biểu đồ phân tán": "scatter",
+        "Doanh thu theo tháng năm 2024 dạng phân tán": "scatter",
         "Hiển thị dạng thẻ KPI": "kpi_card",
         "Doanh thu theo tháng dạng biểu đồ đường": "line",
         "Sản lượng theo production line": None,

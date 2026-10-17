@@ -10,7 +10,7 @@ const names:Record<string,[string,string]>={
   revenue:['Doanh thu','Revenue'], production_output:['Sản lượng','Production output'],
   defect_rate:['Tỷ lệ phế phẩm','Defect rate'], on_time_rate:['Tỷ lệ đúng hạn','On-time rate'], sales_growth:['Tăng trưởng doanh thu','Sales growth'],
   current_revenue:['Doanh thu kỳ này','Current revenue'],previous_revenue:['Doanh thu kỳ trước','Previous revenue'],
-  actual:['Thực tế','Recorded'],forecast:['Dự báo','Forecast'],
+  actual:['Thực tế','Recorded'],forecast:['Dự báo','Forecast'],sample_count:['Số bản ghi','Record count'],
 };
 
 export function ResultChart({config,rows,language}:{config:VizConfig|null;rows:Record<string,unknown>[];language:'vi'|'en'}) {
@@ -44,8 +44,9 @@ export function ResultChart({config,rows,language}:{config:VizConfig|null;rows:R
     data=[...grouped.values()];
     series=categories.map((name,i)=>({key:`series_${i}`,name}));
   }
-  const axes=<><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey={x} type={config.type==='scatter'?'number':'category'} interval={0} angle={-30} textAnchor="end" height={70} tick={{fontSize:11}}/>
-    <YAxis dataKey={config.type==='scatter'?metric:undefined} type="number" tick={{fontSize:12}} width={76} tickFormatter={(v:number)=>new Intl.NumberFormat(language==='vi'?'vi-VN':'en-US',{notation:'compact'}).format(v)}/><Tooltip/><Legend/></>;
+  const scatter=config.type==='scatter';
+  const axes=<><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey={x} name={label(x)} type={scatter?'number':'category'} interval={0} angle={scatter?0:-30} textAnchor={scatter?'middle':'end'} height={scatter?50:70} tick={{fontSize:11}} label={scatter?{value:label(x),position:'insideBottom',offset:-4,fontSize:12}:undefined}/>
+    <YAxis dataKey={scatter?metric:undefined} name={scatter?label(metric):undefined} type="number" tick={{fontSize:12}} width={76} tickFormatter={(v:number)=>new Intl.NumberFormat(language==='vi'?'vi-VN':'en-US',{notation:'compact'}).format(v)}/><Tooltip formatter={scatter?(v:unknown)=>format(Number(v),''):undefined}/><Legend/></>;
   return <figure className="result-chart" aria-label={label(metric)}><figcaption>{label(metric)}</figcaption>
     <ResponsiveContainer width="100%" height={320}>
       {config.type==='pie'||config.type==='donut'?<PieChart><Pie data={data} dataKey={metric} nameKey={x}
