@@ -8,6 +8,7 @@ from app.api.auth import current_user
 from app.conversation.service import get_context
 from app.history.service import (
     build_transcript,
+    clear_owned,
     conversation_results,
     get_owned,
     list_owned,
@@ -26,6 +27,14 @@ def conversations(
     for item in results:
         latest.setdefault(item["conversation_id"], item)
     return {"conversations": list(latest.values())}
+
+
+@router.delete("/conversations")
+def clear_conversations(
+    request: Request, user: dict[str, Any] = Depends(current_user)
+) -> dict[str, int]:
+    """Delete everything this user saved; others' data and the audit log stay."""
+    return {"deleted": clear_owned(request.app.state.storage, user["id"])}
 
 
 @router.get("/conversations/{conversation_id}")

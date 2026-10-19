@@ -89,6 +89,20 @@ def save(
     return result_id
 
 
+def clear_owned(engine: Engine, user_id: int) -> int:
+    """Delete the caller's own saved results and conversation state; the audit stays."""
+    with engine.begin() as connection:
+        deleted = connection.execute(
+            text("DELETE FROM saved_results WHERE user_id=:user_id"),
+            {"user_id": user_id},
+        ).rowcount
+        connection.execute(
+            text("DELETE FROM chat_context WHERE user_id=:user_id"),
+            {"user_id": user_id},
+        )
+    return int(deleted)
+
+
 def list_owned(engine: Engine, user_id: int, role: str) -> list[dict[str, Any]]:
     with engine.connect() as connection:
         rows = (

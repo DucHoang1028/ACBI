@@ -92,6 +92,7 @@ def startup(app: FastAPI) -> None:
                 any(d["approvalStatus"] == "proposed" for d in m["definitions"])
                 for m in dictionary["businessMetrics"]
             ),
+            "relative_dates_from": settings.relative_dates_from,
             "llm_provider": settings.llm_provider,
             "llm_model": settings.llm_model,
             "llm_enabled": app.state.llm is not None,
