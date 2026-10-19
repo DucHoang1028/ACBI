@@ -109,6 +109,7 @@ from app.query.comparison import (
     MAX_PERIODS,
     adjacent,
     day_windows,
+    follow_up_before,
     label,
     named_vs_previous,
     number,
@@ -1589,10 +1590,11 @@ def answer_one(
                 prior,
             )
             return 200, result
+        kept_slots = (prior or {}).get("slots") or {}
         if moved := shifted_period(
-            body.question, (prior or {}).get("slots") or {}, anchor
-        ):
-            # "Cùng kỳ năm trước", "quý trước đó nữa": the earlier period, moved.
+            body.question, kept_slots, anchor
+        ) or follow_up_before(body.question, kept_slots):
+            # "Cùng kỳ năm trước", "quý trước đó nữa", "còn tháng trước": moved back.
             intent = intent.model_copy(
                 update={
                     "period": "explicit",

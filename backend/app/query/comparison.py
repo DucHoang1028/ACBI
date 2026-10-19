@@ -98,6 +98,36 @@ def previous_window(
     return None
 
 
+FOLLOW_BEFORE = (
+    r"\b(?P<vi>thang|quy) (?:truoc|lien truoc)\b"
+    r"|\b(?:last|previous|prior) (?P<en>month|quarter)\b"
+)
+
+
+def follow_up_before(question: str, slots: dict[str, Any]) -> tuple[date, date] | None:
+    """ "Còn tháng trước thì sao?" after a named month: the month before that one.
+
+    Only a short follow-up counts: it names no metric and no period of its own, and
+    the answer on screen is for a whole, named month or quarter."""
+    value = fold(question)
+    found = re.search(FOLLOW_BEFORE, value)
+    if (
+        not found
+        or slots.get("period") != "explicit"
+        or named_periods(question)
+        or re.search(r"\b20\d{2}\b", value)
+        or vocabulary.get().match_metrics(value)
+    ):
+        return None
+    try:
+        start = date.fromisoformat(str(slots["start_date"]))
+        end = date.fromisoformat(str(slots["end_date"]))
+    except (KeyError, ValueError):
+        return None
+    unit = UNIT_KIND[found["vi"] or found["en"]]
+    return previous_window(kind_of(start, end), start, end, unit)
+
+
 def named_vs_previous(question: str) -> list[Period]:
     """ "Tháng 5/2024 so với tháng trước": the month named and the one before *it*.
 

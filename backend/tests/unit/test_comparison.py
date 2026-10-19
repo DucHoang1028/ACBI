@@ -781,6 +781,38 @@ def test_a_follow_up_after_a_named_month_goes_back_from_that_month() -> None:
     ]
 
 
+def test_a_short_follow_up_about_the_month_before_goes_back_from_the_one_shown() -> (
+    None
+):
+    from datetime import date
+
+    from app.query.comparison import follow_up_before
+
+    may = {"period": "explicit", "start_date": "2024-05-01", "end_date": "2024-06-01"}
+    april = (date(2024, 4, 1), date(2024, 5, 1))
+    for question in (
+        "còn tháng trước thì sao?",
+        "tháng trước thì sao",
+        "what about last month?",
+    ):
+        assert follow_up_before(question, may) == april, question
+    q2 = {"period": "explicit", "start_date": "2024-04-01", "end_date": "2024-07-01"}
+    assert follow_up_before("còn quý trước thì sao?", q2) == (
+        date(2024, 1, 1),
+        date(2024, 4, 1),
+    )
+    # a question that names its own metric or period is not a follow-up
+    assert follow_up_before("doanh thu tháng trước", may) is None
+    assert follow_up_before("còn tháng 3/2024 thì sao?", may) is None
+    assert follow_up_before("còn tháng trước của 2023?", may) is None
+    # nothing named on screen, or not a whole month: the relative word counts from today
+    assert (
+        follow_up_before("còn tháng trước thì sao?", {"period": "this_month"}) is None
+    )
+    half = {"period": "explicit", "start_date": "2024-05-01", "end_date": "2024-06-16"}
+    assert follow_up_before("còn tháng trước thì sao?", half) is None
+
+
 def test_same_period_last_year_and_the_one_before_move_the_period_on_screen() -> None:
     from datetime import date
 
