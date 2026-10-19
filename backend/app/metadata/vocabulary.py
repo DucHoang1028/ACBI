@@ -66,6 +66,7 @@ class Metric(Named):
     domain: str = ""
     dimensions: tuple[str, ...] = ()
     date_column: str = ""
+    how: dict[str, str] = field(default_factory=dict)  # plain-words definition
 
 
 @dataclass(frozen=True)
@@ -112,6 +113,7 @@ class Vocabulary:
                 domain=entry["domain"],
                 dimensions=tuple(entry.get("supportedDimensions", [])),
                 date_column=current.get("dateColumn", ""),
+                how=dict(entry.get("howCalculated") or {}),
             )
         self.dimensions: dict[str, Dimension] = {}
         for entry in dictionary["dimensions"]:

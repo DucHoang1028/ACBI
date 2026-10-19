@@ -253,6 +253,59 @@ def test_small_talk_gets_a_fixed_reply_without_a_model() -> None:
         assert small_talk(message, "vi", "manager") is None, message
 
 
+def test_how_a_figure_is_known_is_answered_from_the_dictionary_without_a_model() -> (
+    None
+):
+    from app.conversation.dialogue import method_note
+
+    defect = {"metric_id": "defect_rate"}
+    for message in (
+        "làm sao bạn biết được tỉ lệ phế phẩm",
+        "tính như thế nào",
+        "công thức tính doanh thu là gì",
+        "số này lấy từ đâu",
+        "nguồn dữ liệu là gì",
+        "How did you calculate that?",
+    ):
+        assert method_note(message, "vi", defect), message
+    named = method_note("làm sao bạn biết được tỉ lệ phế phẩm", "vi") or ""
+    assert (
+        "chia cho tổng số lượng đặt" in named and "Nguồn dữ liệu & cách tính" in named
+    )
+    # no metric named: the one of the previous answer
+    assert "Doanh thu là tổng" in (
+        method_note("tính như thế nào", "vi", {"metric_id": "revenue"}) or ""
+    )
+    assert "Defect rate is" in (
+        method_note("how is defect rate calculated?", "en") or ""
+    )
+    for message in (
+        "doanh thu năm 2024",
+        "tỷ lệ phế phẩm 2024",
+        "so sánh doanh thu 2023 và 2024",
+        "tại sao doanh thu giảm",
+        "doanh thu theo khu vực",
+        "how much revenue in 2024",
+    ):
+        assert method_note(message, "vi", defect) is None, message
+
+
+def test_the_trace_shows_what_the_question_was_read_as() -> None:
+    from app.query.orchestrator import intent_trace
+
+    trace = intent_trace(_intent(territory="Canada"), "rules")  # type: ignore[arg-type]
+    assert trace["interpreted_by"] == "rules"
+    assert trace["intent"] == {
+        "metric_id": "revenue",
+        "period": "explicit",
+        "start_date": "2024-01-01",
+        "end_date": "2025-01-01",
+        "territory": "Canada",
+        "limit": 100,
+        "intent_type": "metric_query",
+    }
+
+
 def test_a_factory_number_that_does_not_exist_is_an_unknown_reference() -> None:
     from app.metadata import vocabulary
 

@@ -234,6 +234,57 @@ def small_talk(
     return f"{'Chào bạn!' if vi else 'Hello!'} {fallback('answer', language, role)}"
 
 
+HOW_KNOWN = re.compile(
+    r"\b(?:lam sao|lam the nao|bang cach nao)\b.*\b(?:biet|tinh|co duoc|co so|ra)\b|"
+    r"\btinh\s+(?:ra\s+)?(?:nhu the nao|nhu nao|the nao|ra sao|kieu gi|"
+    r"bang cach nao)\b|"
+    r"\b(?:cach tinh|cong thuc|phuong phap tinh)\b|"
+    r"\b(?:du lieu|so lieu|con so|so nay|lay|tinh)\b.*\b(?:tu dau|o dau)\b|"
+    r"\bnguon (?:du lieu|so lieu)\b|"
+    r"\bhow (?:do|did|does|is|are|was)\b.*"
+    r"\b(?:know|calculat\w+|comput\w+|derive\w*|get)\b|"
+    r"\bwhere\b.*\bcomes? from\b|\b(?:formula|data source)\b"
+)
+
+
+def method_note(
+    question: str, language: str, slots: dict[str, Any] | None = None
+) -> str | None:
+    """How a figure is known, from the approved definition: no model, nothing invented.
+
+    "Làm sao bạn biết tỷ lệ phế phẩm?" names its metric or, failing that, means the
+    one of the previous answer."""
+    value = fold(question)
+    if not HOW_KNOWN.search(value):
+        return None
+    vocab = vocabulary.get()
+    named = vocab.match_metrics(value) or [
+        m for m in [(slots or {}).get("metric_id")] if m in vocab.metrics
+    ]
+    vi = language == "vi"
+    source = (vocab.sources or [{"name": "the company warehouse"}])[0]["name"]
+    meaning = " ".join(
+        f"{vocab.metrics[m].how.get(language) or vocab.metrics[m].description}"
+        for m in named
+    )
+    if vi:
+        tail = (
+            "Con số do câu lệnh SQL đã kiểm duyệt tính từ kho dữ liệu "
+            f"{source}, không phải do AI ước lượng. Mở “Nguồn dữ liệu & cách tính” "
+            "dưới kết quả để xem câu SQL, "
+            "khoảng ngày, phiên bản định nghĩa và giờ lấy dữ liệu."
+        )
+        lead = "" if named else "Hãy hỏi một chỉ số cụ thể để xem định nghĩa của nó. "
+    else:
+        tail = (
+            f"The figure is computed by an approved SQL query on {source}, not "
+            "estimated by the AI. Open “Sources & calculation” under a result to see "
+            "the SQL, date range, definition version and retrieval time."
+        )
+        lead = "" if named else "Ask about one metric to see its definition. "
+    return f"{meaning} {tail}".strip() if named else f"{tail} {lead}".strip()
+
+
 def fallback(mode: str, language: str, role: str) -> str:
     """Plain wording from the dictionary when no grounded reply can be produced."""
     vocab = vocabulary.get()

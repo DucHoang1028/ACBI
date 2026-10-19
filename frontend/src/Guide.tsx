@@ -144,7 +144,7 @@ export function Guide({language, onClose}: {language: 'vi' | 'en'; onClose: () =
             <li>{vi ? <><b>Câu tóm tắt</b>: kỳ đã dùng, con số chính, nhóm cao nhất và thấp nhất.</> : <><b>Summary line</b>: the period used, the main figure, the highest and lowest group.</>}</li>
             <li>{vi ? <><b>Biểu đồ</b>: thẻ số cho một giá trị, đường cho thời gian, tròn hoặc vành khuyên cho phần trăm của tổng, cột để so sánh, cột chồng cho hai chiều.</> : <><b>Chart</b>: a number card for one value, a line for time, pie or donut for shares of a whole, bars to compare, stacked bars for two splits.</>}</li>
             <li>{vi ? <><b>Bảng số</b>: mở "Xem bảng dữ liệu" để thấy từng dòng.</> : <><b>Table</b>: open "View data table" to see every row.</>}</li>
-            <li>{vi ? <><b>Nguồn dữ liệu & cách tính</b>: câu lệnh đã chạy, khoảng ngày, phiên bản định nghĩa và giờ lấy dữ liệu.</> : <><b>Data source & method</b>: the query that ran, the date range, the definition version and retrieval time.</>}</li>
+            <li>{vi ? <><b>Nguồn dữ liệu & cách tính</b>: intent AI đã phân tích từ câu hỏi, câu lệnh đã chạy, khoảng ngày, phiên bản định nghĩa và giờ lấy dữ liệu.</> : <><b>Data source & method</b>: the intent the AI read from the question, the query that ran, the date range, the definition version and retrieval time.</>}</li>
             <li>{vi ? <><b>Lịch sử</b>: mỗi kết quả được lưu ở thanh bên để mở lại.</> : <><b>History</b>: each result is saved in the sidebar so you can reopen it.</>}</li>
           </ol>
         </section>

@@ -22,6 +22,7 @@ businessMetrics:
     en: [production output, output, produced units]
   domain: production
   description: "Good units produced by work orders (ordered minus scrapped), dated by completion. Use for output or produced quantity (sản lượng)."
+  howCalculated: {vi: "Sản lượng là tổng số lượng đặt trừ số lượng phế phẩm của các lệnh sản xuất (SUM(orderqty - scrappedqty)), tính theo ngày hoàn thành lệnh.", en: "Production output is the total ordered quantity minus the scrapped quantity of work orders (SUM(orderqty - scrappedqty)), dated by the day each work order finished."}
   supportedDimensions:
   - date
   - product
@@ -46,6 +47,7 @@ businessMetrics:
     en: [defect rate, scrap rate, scrap, defects]
   domain: quality
   description: "Share of ordered units that were scrapped. Use for defect, scrap or error rate (tỷ lệ lỗi, phế phẩm)."
+  howCalculated: {vi: "Tỷ lệ phế phẩm là tổng số lượng phế phẩm chia cho tổng số lượng đặt của các lệnh sản xuất (SUM(scrappedqty) / SUM(orderqty)), tính theo ngày hoàn thành lệnh và hiển thị theo phần trăm.", en: "Defect rate is the total scrapped quantity divided by the total ordered quantity of work orders (SUM(scrappedqty) / SUM(orderqty)), dated by the day each work order finished and shown as a percentage."}
   supportedDimensions:
   - date
   - product
@@ -71,6 +73,7 @@ businessMetrics:
     en: [on-time, on time, late work orders]
   domain: production
   description: "Share of work orders finished on or before their due date. Use for on-time or late completion (đúng hạn, trễ hạn)."
+  howCalculated: {vi: "Tỷ lệ hoàn thành đúng hạn là số lệnh sản xuất xong vào hoặc trước ngày đến hạn chia cho tổng số lệnh (đếm lệnh có enddate <= duedate / đếm tất cả lệnh).", en: "On-time completion rate is the number of work orders finished on or before their due date divided by all work orders (count with enddate <= duedate / count of all)."}
   reviewNote: Added 2026-09-21 at the owner's request to cover the proposal's line-performance example; the formula was proposed by the assistant and approved by the owner's delegation, so review it.
   supportedDimensions:
   - date
@@ -96,6 +99,7 @@ businessMetrics:
     en: [revenue, sales]
   domain: sales
   description: "Sum of order subtotals (tax and freight excluded), dated by order date. Use for revenue or sales amounts (doanh thu, doanh số)."
+  howCalculated: {vi: "Doanh thu là tổng giá trị đơn hàng (subtotal) của các đơn bán, chưa gồm thuế và phí vận chuyển, tính theo ngày đặt hàng (SUM(subtotal)). Đơn vị tiền tệ của nguồn chưa được xác nhận nên không quy đổi.", en: "Revenue is the sum of order subtotals of sales orders, tax and freight excluded, dated by order date (SUM(subtotal)). The source currency is not certified, so no conversion is applied."}
   supportedDimensions:
   - date
   - sales_territory
@@ -119,6 +123,7 @@ businessMetrics:
     en: [revenue growth, sales growth, growth]
   domain: sales
   description: "Percentage change of revenue against the immediately preceding period of equal length: last month against the month before, last quarter against the quarter before. Use when the user compares with the previous period or asks how much revenue grew or fell (so với tháng trước, tăng hoặc giảm bao nhiêu)."
+  howCalculated: {vi: "Tăng trưởng doanh thu là phần trăm thay đổi của doanh thu so với kỳ liền trước có cùng độ dài: (doanh thu kỳ này - doanh thu kỳ trước) / doanh thu kỳ trước.", en: "Revenue growth is the percentage change of revenue against the immediately preceding period of equal length: (current revenue - previous revenue) / previous revenue."}
   supportedDimensions:
   - date
   - sales_territory

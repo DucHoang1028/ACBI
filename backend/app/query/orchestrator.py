@@ -22,6 +22,7 @@ from app.conversation.dialogue import (
     chat_intent,
     fallback,
     last_answer,
+    method_note,
     reply_from_metadata,
     small_talk,
 )
@@ -567,6 +568,25 @@ def horizon_to(question: str, first: date) -> int | None:
     return months if months > 0 else None
 
 
+INTENT_HIDDEN = {
+    "needs_clarification",
+    "clarification_question",
+    "missing_fields",
+    "deferred_requests",
+}
+
+
+def intent_trace(intent: Intent, interpreter: str) -> dict[str, Any]:
+    """What the question was read as and by what (the model or local rules), for the
+    trace panel next to the SQL it produced."""
+    shown = {
+        k: v
+        for k, v in intent.model_dump().items()
+        if k not in INTENT_HIDDEN and v not in (None, "none", False, [])
+    }
+    return {"intent": shown, "interpreted_by": interpreter}
+
+
 def run_dialogue(
     raw: Intent,
     body: AskRequest,
@@ -632,6 +652,7 @@ def run_forecast(
     request_id: str,
     conversation_id: str,
     prior: dict[str, Any] | None,
+    interpreter: str = "ai",
 ) -> tuple[int, dict[str, Any]]:
     """Trend forecast of revenue or output from complete recorded months."""
     storage, settings, vi = state.storage, state.settings, body.language == "vi"
@@ -854,6 +875,7 @@ def run_forecast(
             "reference_date": anchor.isoformat(),
             "anchor_source": state.readiness["anchor_source"],
             "references": [],
+            **intent_trace(raw, interpreter),
             "forecast": {
                 "is_forecast": True,
                 "method": result.method,
@@ -914,6 +936,7 @@ def run_comparison(
     conversation_id: str,
     prior: dict[str, Any] | None,
     periods: list[Period],
+    interpreter: str = "ai",
 ) -> tuple[int, dict[str, Any]]:
     """One metric across the periods named in the question, side by side."""
     storage, vi = state.storage, body.language == "vi"
@@ -1018,6 +1041,10 @@ def run_comparison(
         conversation_id,
     )
     payload.update(table=table, answer_text=answer_text, llm_calls=budget.calls)
+    trace = intent_trace(intent, interpreter)
+    trace["intent"]["compared_periods"] = [
+        [p[1].isoformat(), p[2].isoformat()] for p in periods
+    ]
     payload["sources"] = {
         "source": "Adventureworks",
         "sql": "\n\n".join(plan.sql for plan in plans),
@@ -1031,6 +1058,7 @@ def run_comparison(
         "reference_date": anchor.isoformat(),
         "anchor_source": state.readiness["anchor_source"],
         "references": [],
+        **trace,
     }
     if table:
         wanted = requested_chart(body.question)
@@ -1355,6 +1383,7 @@ def answer_one(
                 user["role"],
                 bool((prior or {}).get("pending_question")),
             )
+            or method_note(first, body.language, (prior or {}).get("slots"))
         )
         raw = (
             chat_intent()
@@ -1363,6 +1392,7 @@ def answer_one(
             or local_comparison_intent(first)
             or (local_intent(first) if settings.local_intent_enabled else None)
         )
+        interpreter = "rules" if raw is not None else "ai"
         if raw is None:
             try:
                 raw = client.interpret(
@@ -1370,6 +1400,7 @@ def answer_one(
                 )
             except (LLMBusy, httpx.HTTPError):
                 # Every AI key is resting or slow: plain wording needs no model.
+                interpreter = "rules"
                 raw = local_intent(first)
                 prior_slots = (prior or {}).get("slots")
                 if raw is None and prior_slots:
@@ -1526,6 +1557,7 @@ def answer_one(
                     request_id,
                     conversation_id,
                     prior,
+                    interpreter,
                 )
             except PermissionError:
                 outcome = "denied"
@@ -1696,6 +1728,7 @@ def answer_one(
                         conversation_id,
                         prior,
                         periods,
+                        interpreter,
                     )
                 except PermissionError:
                     outcome = "denied"
@@ -2059,6 +2092,7 @@ def answer_one(
                 "reference_date": anchor.isoformat(),
                 "anchor_source": state.readiness["anchor_source"],
                 "references": references,
+                **intent_trace(intent, interpreter),
             },
         )
         if rows:
