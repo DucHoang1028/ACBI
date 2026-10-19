@@ -813,6 +813,57 @@ def test_a_short_follow_up_about_the_month_before_goes_back_from_the_one_shown()
     assert follow_up_before("còn tháng trước thì sao?", half) is None
 
 
+def test_every_relative_unit_goes_back_from_the_period_shown() -> None:
+    from datetime import date
+
+    from app.query.comparison import follow_up_before, relative_pair
+
+    def slots(start: str, end: str) -> dict[str, str]:
+        return {"period": "explicit", "start_date": start, "end_date": end}
+
+    year = slots("2024-01-01", "2025-01-01")
+    month = slots("2024-05-01", "2024-06-01")
+    week = slots("2025-02-03", "2025-02-10")
+    span = slots("2025-02-01", "2025-02-16")
+    assert follow_up_before("còn năm trước thì sao?", year) == (
+        date(2023, 1, 1),
+        date(2024, 1, 1),
+    )
+    assert follow_up_before("còn năm trước thì sao?", month) == (
+        date(2023, 5, 1),
+        date(2023, 6, 1),
+    )
+    assert follow_up_before("còn tuần trước thì sao?", week) == (
+        date(2025, 1, 27),
+        date(2025, 2, 3),
+    )
+    assert follow_up_before("còn kỳ trước thì sao?", month) == (
+        date(2024, 4, 1),
+        date(2024, 5, 1),
+    )
+    assert follow_up_before("còn kỳ trước thì sao?", span) == (
+        date(2025, 1, 17),
+        date(2025, 2, 1),
+    )
+    assert follow_up_before("what about the previous year?", year) == (
+        date(2023, 1, 1),
+        date(2024, 1, 1),
+    )
+    # a week asked about a month is not a week-sized window: left to the usual path
+    assert follow_up_before("còn tuần trước thì sao?", month) is None
+    # "năm ngoái" stays last calendar year; "năm trước" goes back from the year shown
+    anchor = date(2026, 10, 19)
+    pair = relative_pair("so với năm trước", year, anchor)
+    assert [(s.year, e.year) for _, s, e in pair] == [(2023, 2024), (2024, 2025)]
+    pair = relative_pair(
+        "so sánh với quý trước", slots("2024-10-01", "2025-01-01"), anchor
+    )
+    assert [(s, e) for _, s, e in pair] == [
+        (date(2024, 7, 1), date(2024, 10, 1)),
+        (date(2024, 10, 1), date(2025, 1, 1)),
+    ]
+
+
 def test_same_period_last_year_and_the_one_before_move_the_period_on_screen() -> None:
     from datetime import date
 

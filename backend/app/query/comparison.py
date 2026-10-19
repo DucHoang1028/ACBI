@@ -82,6 +82,8 @@ UNIT_KIND = {
     "quarter": "quarter",
     "nam": "year",
     "year": "year",
+    "tuan": "week",
+    "week": "week",
 }
 
 
@@ -95,12 +97,17 @@ def previous_window(
         return month_start(start, -1), start
     if unit == "quarter" and kind == "quarter":
         return month_start(start, -3), start
+    if unit == "week" and (end - start).days == 7:
+        return start - timedelta(days=7), start
+    if unit == "range":
+        return start - (end - start), start
     return None
 
 
 FOLLOW_BEFORE = (
-    r"\b(?P<vi>thang|quy) (?:truoc|lien truoc)\b"
-    r"|\b(?:last|previous|prior) (?P<en>month|quarter)\b"
+    r"\b(?P<vi>thang|quy|nam|tuan|ky) (?:truoc|lien truoc)\b"
+    r"|\b(?:(?:previous|prior|preceding) (?P<en>month|quarter|year|week|period)"
+    r"|last (?P<en2>month|quarter|week))\b"
 )
 
 
@@ -124,8 +131,11 @@ def follow_up_before(question: str, slots: dict[str, Any]) -> tuple[date, date] 
         end = date.fromisoformat(str(slots["end_date"]))
     except (KeyError, ValueError):
         return None
-    unit = UNIT_KIND[found["vi"] or found["en"]]
-    return previous_window(kind_of(start, end), start, end, unit)
+    kind = kind_of(start, end)
+    word = found["vi"] or found["en"] or found["en2"]
+    # "kỳ trước" / "previous period": the same kind of window again, else the same span
+    unit = UNIT_KIND.get(word) or kind
+    return previous_window(kind, start, end, unit)
 
 
 def named_vs_previous(question: str) -> list[Period]:
@@ -297,9 +307,13 @@ def relative_pair(question: str, slots: dict[str, Any], anchor: date) -> list[Pe
             start, end = resolve_period(str(slots["period"]), anchor)
     except (KeyError, ValueError):
         return []
-    if slots.get("period") == "explicit" and name in {"last_month", "last_quarter"}:
-        # An answer for a named month or quarter: "the month before" starts there.
-        unit = "month" if name == "last_month" else "quarter"
+    wording = fold(question)
+    year_before = name == "last_year" and re.search(r"\bnam truoc\b", wording)
+    if slots.get("period") == "explicit" and (
+        name in {"last_month", "last_quarter"} or year_before
+    ):
+        # An answer for a named period: "the month before" starts there.
+        unit = {"last_month": "month", "last_quarter": "quarter"}.get(name, "year")
         earlier = previous_window(kind_of(start, end), start, end, unit)
         if earlier is not None:
             return _uniform(
