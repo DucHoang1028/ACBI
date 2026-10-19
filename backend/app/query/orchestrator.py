@@ -1986,7 +1986,7 @@ def answer_one(
         capped = bool(rows) and len(rows) >= row_cap(intent)
         capped = capped and not top_n(body.question)
         # A top N is also a cut list: its shares are of those rows, not of the whole.
-        listed = capped or (intent.limit < 100 and len(rows) >= intent.limit)
+        cut_list = bool(capped) or (intent.limit < 100 and len(rows) >= intent.limit)
         if capped:
             cut = (
                 f"Chỉ hiển thị {len(rows)} dòng đầu tiên; còn dòng khác chưa hiển "
@@ -2033,7 +2033,7 @@ def answer_one(
                     plan.end,
                     body.language,
                     scope_of(intent),
-                    listed,
+                    cut_list,
                 )
             ),
             sources={
