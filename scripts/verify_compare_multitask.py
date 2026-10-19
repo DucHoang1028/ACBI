@@ -70,7 +70,21 @@ def relative_status(window: tuple[date, date]) -> tuple[str, ...]:
     return (status_for(window),)
 
 
+# A free AI plan needs a pause after each model call (LiteRouter: 7 s between them).
+AI_REST = float(os.environ.get("AI_REST_SECONDS", "0"))
+_last_ai_call = [0.0]
+
+
 def call(base: str, path: str, body: dict[str, Any], token: str | None = None) -> Any:
+    if path == "/api/chat/ask" and AI_REST:
+        time.sleep(max(0.0, _last_ai_call[0] + AI_REST - time.monotonic()))
+    result = post(base, path, body, token)
+    if isinstance(result, dict) and result.get("llm_calls"):
+        _last_ai_call[0] = time.monotonic()
+    return result
+
+
+def post(base: str, path: str, body: dict[str, Any], token: str | None = None) -> Any:
     request = urllib.request.Request(
         base + path,
         data=json.dumps(body).encode(),
@@ -85,6 +99,8 @@ def call(base: str, path: str, body: dict[str, Any], token: str | None = None) -
             return json.loads(error.read())
         except ValueError:
             return {"status": f"http_{error.code}", "table": []}
+    except OSError as error:  # a timeout or a dropped connection fails the case
+        return {"status": "technical_failure", "message": str(error), "table": []}
 
 
 def expect(
