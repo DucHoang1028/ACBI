@@ -255,10 +255,11 @@ dataMappings:
     drop the order.'
   - Source currency is not certified as USD or VND; no currency conversion is inferred.
 datePolicy:
-  anchor: DATA_AS_OF or MAX(sales.salesorderheader.orderdate)::date
+  anchor: today in Vietnam (UTC+7); with RELATIVE_DATES_FROM=data, DATA_AS_OF or MAX(sales.salesorderheader.orderdate)::date
+  dataEnd: DATA_AS_OF or MAX(sales.salesorderheader.orderdate)::date; a period past it returns no data and says the data ends there
   validateAgainst: MIN/MAX sales order dates at startup
   intervals: start inclusive, end exclusive
-  currentPeriods: period start through DATA_AS_OF inclusive
+  currentPeriods: period start through the anchor date inclusive
   previousPeriods: last_month/last_quarter mean complete previous calendar period
   recently: requires clarification unless conversation already specifies a period
   timezone: source dates are timestamp without time zone; treat as date, do not shift timezone

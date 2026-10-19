@@ -5,7 +5,7 @@ import { Admin } from './Admin';
 import { Guide } from './Guide';
 import './style.css';
 
-type Readiness = {data_as_of:string;relative_dates_from?:string;llm_enabled:boolean;advanced_analysis_enabled:boolean};
+type Readiness = {data_as_of:string;relative_dates_from?:string;demo_login_enabled?:boolean;llm_enabled:boolean;advanced_analysis_enabled:boolean};
 type Identity = {username:string;role:string;factories:number[]|'all'};
 function App() {
   const [language,setLanguage]=useState<'vi'|'en'>('vi');
@@ -58,7 +58,7 @@ function App() {
     {guide?<Guide language={language} onClose={()=>openGuide(false)}/>:!identity?<section className="login-view"><div className="login-intro"><span className="eyebrow">CONVERSATIONAL BUSINESS INTELLIGENCE</span><h1>{vi?'Dữ liệu của bạn.\nCâu trả lời rõ ràng.':'Your data.\nClear answers.'}</h1><p>{vi?'Khám phá doanh thu, sản xuất và chất lượng qua cuộc trò chuyện. Mỗi kết quả đều có nguồn để kiểm chứng.':'Explore revenue, production and quality through conversation. Every result has a source.'}</p><div className="feature-tags"><span>AdventureWorks</span><span>{vi?'Truy cập theo vai trò':'Role-based access'}</span><span>{vi?'Dữ liệu có kiểm chứng':'Traceable results'}</span></div></div>
       <form className="login-card" onSubmit={signIn}><div className="app-icon">A</div><h2>{vi?'Chào mừng trở lại':'Welcome back'}</h2><p>{vi?'Đăng nhập để bắt đầu phân tích.':'Sign in to start exploring.'}</p><label>{vi?'Tên tài khoản':'Username'}<input required autoComplete="username" value={username} onChange={e=>setUsername(e.target.value)}/></label><label>{vi?'Mật khẩu':'Password'}<input required type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)}/></label>{error&&<p className="error" role="alert">{error}</p>}<button className="primary" disabled={busy}>{busy?(vi?'Đang đăng nhập…':'Signing in…'):(vi?'Đăng nhập':'Sign in')}</button>{demoUsers.length>0&&<div className="demo-login"><p>{vi?'Bản demo: đăng nhập nhanh không cần mật khẩu':'Demo: one-click sign-in, no password'}</p>{demoUsers.map(u=><button type="button" key={u.username} disabled={busy} onClick={()=>demoSignIn(u.username)}>{vi?'Đăng nhập với ':'Login as '}<b>{u.username}</b> <small>({u.role})</small></button>)}</div>}</form></section>
       :identity.role==='it_admin'?<section className="admin-page"><h1>{vi?'Quản trị hệ thống':'Administration'}</h1><Admin access={access} language={language}/></section>
-      :<Chat key={identity.username} access={access} enabled={!!data?.llm_enabled} advancedEnabled={!!data?.advanced_analysis_enabled} anchor={data?.data_as_of||''} datesFrom={data?.relative_dates_from||'today'} language={language} role={identity.role}/>}
+      :<Chat key={identity.username} access={access} enabled={!!data?.llm_enabled} advancedEnabled={!!data?.advanced_analysis_enabled} anchor={data?.data_as_of||''} datesFrom={data?.relative_dates_from||'today'} canClear={!!data?.demo_login_enabled} language={language} role={identity.role}/>}
   </main>;
 }
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);

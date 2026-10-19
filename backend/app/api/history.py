@@ -33,7 +33,12 @@ def conversations(
 def clear_conversations(
     request: Request, user: dict[str, Any] = Depends(current_user)
 ) -> dict[str, int]:
-    """Delete everything this user saved; others' data and the audit log stay."""
+    """Delete everything this user saved; others' data and the audit log stay.
+
+    Demo only (shared one-click accounts). Elsewhere saved results are the record that
+    ties each answer to its SQL and parameters, so they are kept."""
+    if not request.app.state.settings.demo_login_enabled:
+        raise HTTPException(status_code=403, detail="Deleting saved data is disabled")
     return {"deleted": clear_owned(request.app.state.storage, user["id"])}
 
 

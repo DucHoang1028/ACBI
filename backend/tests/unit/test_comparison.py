@@ -565,9 +565,16 @@ def test_a_cut_list_does_not_call_its_shown_rows_the_total() -> None:
 
 
 def test_a_factory_outside_the_role_is_said_so_not_dropped_silently() -> None:
+    from types import SimpleNamespace
+
     import pytest
     from app.ai.client import Intent
-    from app.query.orchestrator import check_named_factories, factory_notes
+    from app.presentation.contract import AskRequest
+    from app.query.orchestrator import (
+        check_named_factories,
+        factory_notes,
+        run_comparison,
+    )
 
     def factory_intent(factory_id: int | None = None) -> Intent:
         return Intent.model_validate(
@@ -599,6 +606,22 @@ def test_a_factory_outside_the_role_is_said_so_not_dropped_silently() -> None:
     with pytest.raises(PermissionError):  # only factories the role cannot see
         check_named_factories(
             factory_intent(), "So sánh sản lượng Factory B và Factory C", "production"
+        )
+    # the period comparison applies the same rule
+    period = ("year", date(2023, 1, 1), date(2024, 1, 1))
+    asked = "So sánh sản lượng Factory B và Factory C năm 2023 và 2024"
+    with pytest.raises(PermissionError):
+        run_comparison(
+            factory_intent(),
+            AskRequest(question=asked, language="vi"),
+            {"id": 1, "role": "production"},
+            SimpleNamespace(storage=None),
+            None,  # type: ignore[arg-type]
+            date(2026, 10, 19),
+            "r1",
+            "c1",
+            None,
+            [period, period],
         )
 
 

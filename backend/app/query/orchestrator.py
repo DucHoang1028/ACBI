@@ -941,6 +941,7 @@ def run_comparison(
     intent = checked.model_copy(
         update={"needs_clarification": False, "missing_fields": []}
     )
+    check_named_factories(intent, body.question, user["role"])
     if len(periods) > MAX_PERIODS or len({p[0] for p in periods}) > 1:
         return ask_again(
             "Hãy so sánh tối đa 4 kỳ cùng loại: cùng là năm, cùng là quý hoặc cùng "
@@ -997,6 +998,10 @@ def run_comparison(
         bool(re.search(RANKING_WORDS, fold(body.question))),
         top_n(body.question),
     )
+    if group == "factory" and (
+        lost := factory_notes(table, body.question, user["role"], body.language)
+    ):
+        answer_text = f"{answer_text} {lost}"
     gap = coverage_note(
         min(p[1] for p in periods),
         max(p[2] for p in periods),

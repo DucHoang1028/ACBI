@@ -54,3 +54,21 @@ def test_clearing_saved_data_deletes_only_the_callers_rows_and_keeps_the_audit()
     assert statements[1].startswith("DELETE FROM chat_context")
     assert all(p == {"user_id": 7} for _, p in seen)
     assert not any("access_audit" in s for s in statements)
+
+
+def test_saved_data_can_be_deleted_only_when_the_demo_switch_is_on() -> None:
+    from types import SimpleNamespace
+
+    import pytest
+    from app.api.history import clear_conversations
+    from fastapi import HTTPException
+
+    def request(demo: bool) -> SimpleNamespace:
+        settings = SimpleNamespace(demo_login_enabled=demo)
+        return SimpleNamespace(
+            app=SimpleNamespace(state=SimpleNamespace(settings=settings))
+        )
+
+    with pytest.raises(HTTPException) as denied:
+        clear_conversations(request(False), {"id": 7})  # type: ignore[arg-type]
+    assert denied.value.status_code == 403
