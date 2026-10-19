@@ -13,6 +13,7 @@ from app.core.dates import (
     date_hints,
     minus_year,
     month_start,
+    named_periods,
     resolve_period,
     shifted_period,
 )
@@ -66,6 +67,59 @@ def _uniform(pair: list[Period]) -> list[Period]:
     if len({p[0] for p in pair}) > 1:
         return [("range", p[1], p[2]) for p in pair]
     return pair
+
+
+PRIOR_THAN = (
+    r"\b(?:(?:so )?voi|vs|versus|compared (?:to|with)|than)\b.*?\b"
+    r"(?:(?P<vi>thang|quy|nam|ky) (?:truoc|ngoai|lien truoc)"
+    r"|(?:the )?(?:previous|last|prior|preceding) (?P<en>month|quarter|year|period))\b"
+)
+CHANGE_WORDS = r"\b(?:tang truong|growth|tang bao nhieu|giam bao nhieu|thay doi)\b"
+UNIT_KIND = {
+    "thang": "month",
+    "month": "month",
+    "quy": "quarter",
+    "quarter": "quarter",
+    "nam": "year",
+    "year": "year",
+}
+
+
+def previous_window(
+    kind: str, start: date, end: date, unit: str
+) -> tuple[date, date] | None:
+    """The month or quarter just before a whole one, or the same window a year back."""
+    if unit == "year":
+        return minus_year(start), minus_year(end)
+    if unit == "month" and kind == "month":
+        return month_start(start, -1), start
+    if unit == "quarter" and kind == "quarter":
+        return month_start(start, -3), start
+    return None
+
+
+def named_vs_previous(question: str) -> list[Period]:
+    """ "Tháng 5/2024 so với tháng trước": the month named and the one before *it*.
+
+    A relative word beside a period the question names counts from that period, not
+    from today. A change word ("tăng trưởng") with no other period means the same."""
+    named = named_periods(question)
+    if len(named) != 1:
+        return []
+    value = fold(question)
+    kind, start, end = named[0]
+    if found := re.search(PRIOR_THAN, value):
+        unit = UNIT_KIND.get(found["vi"] or found["en"], kind)
+    elif re.search(CHANGE_WORDS, value):
+        unit = kind
+    else:
+        return []
+    earlier = previous_window(kind, start, end, unit)
+    if earlier is None:
+        return []
+    return _uniform(
+        sorted([(kind_of(*earlier), *earlier), named[0]], key=lambda p: p[1])
+    )
 
 
 def with_earlier_period(named: list[Period], slots: dict[str, Any]) -> list[Period]:
@@ -213,6 +267,20 @@ def relative_pair(question: str, slots: dict[str, Any], anchor: date) -> list[Pe
             start, end = resolve_period(str(slots["period"]), anchor)
     except (KeyError, ValueError):
         return []
+    if slots.get("period") == "explicit" and name in {"last_month", "last_quarter"}:
+        # An answer for a named month or quarter: "the month before" starts there.
+        unit = "month" if name == "last_month" else "quarter"
+        earlier = previous_window(kind_of(start, end), start, end, unit)
+        if earlier is not None:
+            return _uniform(
+                sorted(
+                    [
+                        (kind_of(*earlier), *earlier),
+                        (kind_of(start, end), start, end),
+                    ],
+                    key=lambda p: p[1],
+                )
+            )
     named_start, named_end = resolve_period(name, anchor)
     if (named_start, named_end) == (start, end):
         return []

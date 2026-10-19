@@ -110,6 +110,7 @@ from app.query.comparison import (
     adjacent,
     day_windows,
     label,
+    named_vs_previous,
     number,
     relative_pair,
     shift_pair,
@@ -1645,8 +1646,10 @@ def answer_one(
             )
             return 200, response(outcome, question, request_id, conversation_id)
         growth_note = None
-        periods = (named_periods(body.question) if comparing else []) or day_windows(
-            body.question, anchor
+        periods = (
+            (named_periods(body.question) if comparing else [])
+            or day_windows(body.question, anchor)
+            or named_vs_previous(body.question)
         )
         if not periods and re.search(COMPARE_WORDS, fold(body.question)):
             # "So sánh với 2023" after a 2024 answer: the period on screen and 2023.

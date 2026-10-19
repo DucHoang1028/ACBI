@@ -705,6 +705,82 @@ def test_a_period_past_the_data_says_where_the_data_stops() -> None:
     )
 
 
+def test_a_relative_word_beside_a_named_period_counts_from_that_period() -> None:
+    from datetime import date
+
+    from app.query.comparison import named_vs_previous
+
+    def spans(question: str) -> list[tuple[str, date, date]]:
+        return named_vs_previous(question)
+
+    april_may = [
+        ("month", date(2024, 4, 1), date(2024, 5, 1)),
+        ("month", date(2024, 5, 1), date(2024, 6, 1)),
+    ]
+    for question in (
+        "Doanh thu tháng 5/2024 so với tháng trước đấy thế nào?",
+        "Doanh thu tháng 5 năm 2024 so với tháng trước",
+        "Doanh thu tháng 5/2024 với tháng trước",
+        "Doanh thu tháng 5/2024 so với tháng liền trước",
+        "Doanh thu tháng 5/2024 so với kỳ trước",
+        "Tăng trưởng doanh thu tháng 5/2024",
+        "Doanh thu tháng 5/2024 tăng hay giảm bao nhiêu",
+        "Revenue for May 2024 compared with the previous month",
+    ):
+        assert spans(question) == april_may, question
+    assert spans("Doanh thu tháng 1/2024 so với tháng trước") == [
+        ("month", date(2023, 12, 1), date(2024, 1, 1)),
+        ("month", date(2024, 1, 1), date(2024, 2, 1)),
+    ]
+    assert spans("Sản lượng quý 2 năm 2024 so với quý trước") == [
+        ("quarter", date(2024, 1, 1), date(2024, 4, 1)),
+        ("quarter", date(2024, 4, 1), date(2024, 7, 1)),
+    ]
+    assert spans("Doanh thu quý 1 năm 2025 tăng bao nhiêu") == [
+        ("quarter", date(2024, 10, 1), date(2025, 1, 1)),
+        ("quarter", date(2025, 1, 1), date(2025, 4, 1)),
+    ]
+    assert spans("Doanh thu năm 2024 so với năm trước") == [
+        ("year", date(2023, 1, 1), date(2024, 1, 1)),
+        ("year", date(2024, 1, 1), date(2025, 1, 1)),
+    ]
+    assert spans("Doanh thu tháng 5/2024 so với năm ngoái") == [
+        ("month", date(2023, 5, 1), date(2023, 6, 1)),
+        ("month", date(2024, 5, 1), date(2024, 6, 1)),
+    ]
+
+
+def test_a_relative_word_with_no_period_named_is_left_to_the_usual_path() -> None:
+    from app.query.comparison import named_vs_previous
+
+    for question in (
+        "Doanh thu tháng này so với tháng trước",  # both relative: growth as before
+        "Doanh thu tháng 4/2024 và tháng 5/2024 so với tháng trước",  # two named
+        "Doanh thu tháng 5/2024 so với quý trước",  # a month against a quarter
+        "Doanh thu tháng 5/2024",  # nothing to compare with
+        "so với tháng trước thì sao?",  # a follow-up: the answer on screen decides
+    ):
+        assert named_vs_previous(question) == [], question
+
+
+def test_a_follow_up_after_a_named_month_goes_back_from_that_month() -> None:
+    from datetime import date
+
+    from app.query.comparison import relative_pair
+
+    anchor = date(2026, 10, 19)
+    may = {"period": "explicit", "start_date": "2024-05-01", "end_date": "2024-06-01"}
+    assert relative_pair("so với tháng trước thì sao?", may, anchor) == [
+        ("month", date(2024, 4, 1), date(2024, 5, 1)),
+        ("month", date(2024, 5, 1), date(2024, 6, 1)),
+    ]
+    q2 = {"period": "explicit", "start_date": "2024-04-01", "end_date": "2024-07-01"}
+    assert relative_pair("so sánh với quý trước", q2, anchor) == [
+        ("quarter", date(2024, 1, 1), date(2024, 4, 1)),
+        ("quarter", date(2024, 4, 1), date(2024, 7, 1)),
+    ]
+
+
 def test_same_period_last_year_and_the_one_before_move_the_period_on_screen() -> None:
     from datetime import date
 
