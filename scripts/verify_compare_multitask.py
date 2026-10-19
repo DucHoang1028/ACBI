@@ -15,9 +15,59 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
 
 Check = Callable[[dict[str, Any]], list[str]]
+
+
+# ---- the server's clock -----------------------------------------------------------
+# Relative periods ("tháng trước", "năm nay") count from today in Vietnam, or from the
+# last day of the sample data when the server runs with RELATIVE_DATES_FROM=data (set
+# the same variable when running this script against such a server).
+DATA_END = date(2025, 6, 29)  # last day of the sample data
+
+
+def reference_date() -> date:
+    if os.environ.get("RELATIVE_DATES_FROM", "today") == "data":
+        return DATA_END
+    return datetime.now(timezone(timedelta(hours=7))).date()
+
+
+def month_start(day: date, delta: int = 0) -> date:
+    index = day.year * 12 + day.month - 1 + delta
+    return date(index // 12, index % 12 + 1, 1)
+
+
+def quarter_start(day: date) -> date:
+    return date(day.year, 3 * ((day.month - 1) // 3) + 1, 1)
+
+
+TODAY = reference_date()
+_NEXT = TODAY + timedelta(days=1)
+_MONDAY = TODAY - timedelta(days=TODAY.weekday())
+THIS_MONTH = (month_start(TODAY), _NEXT)
+LAST_MONTH = (month_start(TODAY, -1), month_start(TODAY))
+THIS_QUARTER = (quarter_start(TODAY), _NEXT)
+LAST_QUARTER = (month_start(quarter_start(TODAY), -3), quarter_start(TODAY))
+BEFORE_LAST_QUARTER = (month_start(LAST_QUARTER[0], -3), LAST_QUARTER[0])
+LAST_WEEK = (_MONDAY - timedelta(days=7), _MONDAY)
+YESTERDAY = (TODAY - timedelta(days=1), TODAY)
+THIS_YEAR = (date(TODAY.year, 1, 1), _NEXT)
+LAST_YEAR = (date(TODAY.year - 1, 1, 1), date(TODAY.year, 1, 1))
+
+
+def iso(window: tuple[date, date]) -> tuple[str, str]:
+    return window[0].isoformat(), window[1].isoformat()
+
+
+def status_for(window: tuple[date, date]) -> str:
+    """A period that starts after the last day of the data has nothing to show."""
+    return "no_data" if window[0] > DATA_END else "ok"
+
+
+def relative_status(window: tuple[date, date]) -> tuple[str, ...]:
+    return (status_for(window),)
 
 
 def call(base: str, path: str, body: dict[str, Any], token: str | None = None) -> Any:
@@ -541,7 +591,10 @@ CASES = [
         [
             (
                 "Doanh thu năm 2024 theo khu vực, sản lượng theo nhà máy năm 2024 và tỷ lệ phế phẩm quý trước",
-                dict(status="ok", parts=[dict(status="ok"), dict(status="ok")]),
+                dict(
+                    status="ok",
+                    parts=[dict(status="ok"), dict(status=status_for(LAST_QUARTER))],
+                ),
                 None,
             )
         ],
@@ -553,7 +606,10 @@ CASES = [
         [
             (
                 "Doanh thu tháng này và sản lượng tháng này",
-                dict(status="ok", parts=[dict(status="ok")]),
+                dict(
+                    status=status_for(THIS_MONTH),
+                    parts=[dict(status=status_for(THIS_MONTH))],
+                ),
                 None,
             )
         ],
@@ -614,7 +670,10 @@ CASES = [
         [
             (
                 "revenue for 2024 by territory, output by factory for 2024, and defect rate last quarter",
-                dict(status="ok", parts=[dict(status="ok"), dict(status="ok")]),
+                dict(
+                    status="ok",
+                    parts=[dict(status="ok"), dict(status=status_for(LAST_QUARTER))],
+                ),
                 None,
             )
         ],
@@ -720,7 +779,13 @@ CASES = [
         [
             (
                 "doanh thu quý trước, tăng trưởng doanh thu quý trước theo khu vực và sản lượng quý trước",
-                dict(status="ok", parts=[dict(status="ok"), dict(status="denied")]),
+                dict(
+                    status=status_for(LAST_QUARTER),
+                    parts=[
+                        dict(status=status_for(LAST_QUARTER)),
+                        dict(status="denied"),
+                    ],
+                ),
                 None,
             )
         ],

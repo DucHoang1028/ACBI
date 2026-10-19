@@ -17,10 +17,25 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from verify_compare_multitask import call
+from verify_compare_multitask import (
+    BEFORE_LAST_QUARTER,
+    LAST_MONTH,
+    LAST_QUARTER,
+    LAST_WEEK,
+    LAST_YEAR,
+    THIS_MONTH,
+    THIS_QUARTER,
+    THIS_YEAR,
+    YESTERDAY,
+    call,
+    iso,
+    relative_status,
+)
 
 Result = dict[str, Any]
 Check = Callable[[list[Result]], list[str]]
+
+
 NUMBER = re.compile(r"\d{1,3}(?:[.,]\d{3})+|\d{4,}")
 
 
@@ -347,7 +362,7 @@ CASES = [
         [
             turn(
                 "Tại sao doanh thu quý trước giảm?",
-                status=("needs_clarification", "ok"),
+                status=("needs_clarification", "ok", "no_data"),
                 has_any=("nguyên nhân", "giải thích", "reasons", "explain"),
             )
         ],
@@ -593,29 +608,29 @@ CASES = [
         "V01",
         "manager",
         "vi",
-        [turn("doanh thu thang truoc the nao", status=("ok",))],
-        final=lambda rs: _window_is(rs[-1], "2025-05-01", "2025-06-01"),
+        [turn("doanh thu thang truoc the nao", status=relative_status(LAST_MONTH))],
+        final=lambda rs: _window_is(rs[-1], *iso(LAST_MONTH)),
     ),
     case(
         "V02",
         "manager",
         "vi",
-        [turn("dt quý này bn", status=("ok",))],
-        final=lambda rs: _window_is(rs[-1], "2025-04-01", "2025-06-30"),
+        [turn("dt quý này bn", status=relative_status(THIS_QUARTER))],
+        final=lambda rs: _window_is(rs[-1], *iso(THIS_QUARTER)),
     ),
     case(
         "V03",
         "manager",
         "vi",
-        [turn("tháng trc bán đc bao nhiêu tiền", status=("ok",))],
-        final=lambda rs: _window_is(rs[-1], "2025-05-01", "2025-06-01"),
+        [turn("tháng trc bán đc bao nhiêu tiền", status=relative_status(LAST_MONTH))],
+        final=lambda rs: _window_is(rs[-1], *iso(LAST_MONTH)),
     ),
     case(
         "V04",
         "manager",
         "vi",
-        [turn("doanh số tuần vừa rồi ấy", status=("ok",))],
-        final=lambda rs: _window_is(rs[-1], "2025-06-16", "2025-06-23"),
+        [turn("doanh số tuần vừa rồi ấy", status=relative_status(LAST_WEEK))],
+        final=lambda rs: _window_is(rs[-1], *iso(LAST_WEEK)),
     ),
     case("V05", "manager", "vi", [turn("ok", status=("ok",), no_data_rows=True)]),
     case(
@@ -702,8 +717,8 @@ CASES = [
         "V17",
         "manager",
         "vi",
-        [turn("revenue tháng này bao nhiêu", status=("ok",))],
-        final=lambda rs: _window_is(rs[-1], "2025-06-01", "2025-06-30"),
+        [turn("revenue tháng này bao nhiêu", status=relative_status(THIS_MONTH))],
+        final=lambda rs: _window_is(rs[-1], *iso(THIS_MONTH)),
     ),
     case(
         "V18",
@@ -889,7 +904,7 @@ CASES = [
         "K08",
         "manager",
         "vi",
-        [turn("Tăng trưởng doanh thu quý trước", status=("ok",))],
+        [turn("Tăng trưởng doanh thu quý trước", status=relative_status(LAST_QUARTER))],
         final=lambda rs: _growth_q(rs[-1]),
     ),
     case(
@@ -967,35 +982,35 @@ CASES = [
         "manager",
         "vi",
         [turn("Doanh thu tuần trước", status=("ok", "no_data"))],
-        final=lambda rs: _window_is(rs[-1], "2025-06-16", "2025-06-23"),
+        final=lambda rs: _window_is(rs[-1], *iso(LAST_WEEK)),
     ),
     case(
         "D02",
         "manager",
         "vi",
-        [turn("Doanh thu 30 ngày gần nhất", status=("ok",))],
+        [turn("Doanh thu 30 ngày gần nhất", status=("ok", "no_data"))],
         final=each_self_consistent,
     ),
     case(
         "D03",
         "manager",
         "vi",
-        [turn("Doanh thu năm nay", status=("ok",))],
-        final=lambda rs: _window_is(rs[-1], "2025-01-01", "2025-06-30"),
+        [turn("Doanh thu năm nay", status=relative_status(THIS_YEAR))],
+        final=lambda rs: _window_is(rs[-1], *iso(THIS_YEAR)),
     ),
     case(
         "D04",
         "manager",
         "vi",
         [turn("Doanh thu hôm qua", status=("ok", "no_data"))],
-        final=lambda rs: _window_is(rs[-1], "2025-06-28", "2025-06-29"),
+        final=lambda rs: _window_is(rs[-1], *iso(YESTERDAY)),
     ),
     case(
         "D05",
         "manager",
         "en",
-        [turn("Revenue last year", status=("ok",))],
-        final=lambda rs: _window_is(rs[-1], "2024-01-01", "2025-01-01"),
+        [turn("Revenue last year", status=relative_status(LAST_YEAR))],
+        final=lambda rs: _window_is(rs[-1], *iso(LAST_YEAR)),
     ),
     # ================= hard multi-constraint questions ================================
     case(
@@ -1222,12 +1237,12 @@ def _boundaries(rs: list[Result]) -> list[str]:
 
 
 def _growth_q(result: Result) -> list[str]:
+    if result.get("status") == "no_data":
+        return []  # the quarter lies past the data: nothing to compare
     row = (result.get("table") or [{}])[0]
     if "sales_growth" not in row:
         return [f"no growth column: {list(row)}"]
-    now, before = revenue("2025-01-01", "2025-04-01"), revenue(
-        "2024-10-01", "2025-01-01"
-    )
+    now, before = revenue(*iso(LAST_QUARTER)), revenue(*iso(BEFORE_LAST_QUARTER))
     if now is None or not before:
         return []
     expected = (now - before) / before
